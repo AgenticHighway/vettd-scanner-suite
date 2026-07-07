@@ -144,8 +144,19 @@ vite.config.ts.timestamp-*
 
 # IDE
 .vscode/
-.DS_Store/
+.DS_Store
 .idea/
+*.swp
+*.swo
 
 # Local files
 .local/
+
+# Python (bundled scanner shims, e.g. cisco-shim)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Native/build artifacts (e.g. compiled Rust shim binaries)
+*.pdb

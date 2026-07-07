@@ -1,0 +1,4 @@
+title = "vettd-scanner-suite gitleaks config"
+
+[extend]
+useDefault = true

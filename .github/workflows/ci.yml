@@ -1,0 +1,85 @@
+# ──────────────────────────────────────────────────────────────────────
+# CI — runs on every PR, push to main, and weekly on a schedule.
+#
+# PURPOSE:
+#   Gate merges behind automated checks: lint, typecheck, test, and
+#   secrets scanning.
+#
+# JOBS (run in parallel):
+#   check    — lint → typecheck → test → build
+#   secrets  — gitleaks (always runs — any file can contain secrets)
+#
+# NOTE: no pnpm-lock.yaml is committed yet (see repo setup notes) — this
+# job uses a plain `pnpm install`. Switch to `--frozen-lockfile` once a
+# lockfile exists.
+# ──────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+    schedule:
+        # Weekly on Monday at 06:00 UTC — catches new advisories even
+        # when no dependency files have changed since the last PR.
+        - cron: '0 6 * * 1'
+
+concurrency:
+    group: ci-${{ (github.event_name == 'push' || github.event_name == 'schedule') && github.run_id || github.head_ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        name: Lint, typecheck & test
+        runs-on: blacksmith-4vcpu-ubuntu-2204
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install Node
+              uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+              with:
+                  node-version: '24'
+
+            - name: Enable Corepack
+              run: corepack enable
+
+            - name: Install dependencies
+              run: pnpm install
+
+            - name: Lint
+              run: pnpm lint
+
+            - name: Typecheck
+              run: pnpm typecheck
+
+            - name: Test
+              run: pnpm test
+
+            - name: Build
+              run: pnpm build
+
+    secrets:
+        name: Secrets scan
+        runs-on: blacksmith-2vcpu-ubuntu-2204
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  fetch-depth: 0 # full history for scanning all commits
+
+            - name: Install gitleaks
+              run: |
+                  GL_VERSION="8.30.1"
+                  GL_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+                  curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VERSION}/gitleaks_${GL_VERSION}_linux_x64.tar.gz" \
+                    -o gitleaks.tar.gz
+                  echo "${GL_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+                  tar xzf gitleaks.tar.gz -C /usr/local/bin gitleaks
+                  rm gitleaks.tar.gz
+                  gitleaks version
+
+            - name: Scan for secrets
+              run: gitleaks detect --source . --config .gitleaks.toml --verbose
