@@ -1,20 +1,49 @@
 # vettd-scanner-suite
 
-Unified scanner suite for the `vettd` ecosystem — orchestrates first-party
-scanners (e.g. `vettd-skill-scanner`) and third-party integrations (e.g.
-Cisco AI Defense, Socket) behind a single normalized findings contract.
+Unified scanner suite for the `vettd` ecosystem — a standalone HTTP service
+that orchestrates first-party scanners (`vettd-skill-scanner`, via its Rust
+HTTP shim) and third-party integrations (Cisco AI Defense, Socket) behind a
+single normalized findings contract.
 
-**Status:** early scaffolding, no application code yet. Private repo;
-`license` is intentionally `UNLICENSED` while source-available vs.
-open-source is still undecided.
+Private repo; `license` is intentionally `UNLICENSED` while source-available
+vs. open-source is still undecided. Tracking issue:
+[AgenticHighway/vettd#643](https://github.com/AgenticHighway/vettd/issues/643).
+Architecture details: [docs/design.md](docs/design.md).
 
-## Consumers
+## Repo layout
 
-- The `vettd` web app's scanning backend (cloud deployment).
-- Local/power-user runs via a distributable Docker image.
+| Path | What it is |
+|---|---|
+| `src/contract/` | Canonical findings contract (`AssetFinding`, scanner interfaces) |
+| `src/config/` | TOML config schema, loading, validation |
+| `src/intake/` | Zip extraction and validation |
+| `src/core/` | Runner fan-out, config-driven registry, job store/executor |
+| `src/adapters/` | Per-scanner normalization (vettd, cisco, socket, SARIF mapping) |
+| `src/server/` | Fastify app and service entry point |
+| `shims/cisco/` | Python shim wrapping the `cisco-ai-skill-scanner` pip package |
+| `docs/` | Design docs |
 
-See [AgenticHighway/vettd#643](https://github.com/AgenticHighway/vettd/issues/643)
-for the tracking issue.
+## Quickstart
+
+```bash
+cp scanner-suite.example.toml scanner-suite.toml   # then adjust; gitignored
+
+# terminal 1 — first-party scanner shim (in the vettd-skill-scanner repo):
+cargo run -p http-shim
+
+# terminal 2 — the suite:
+pnpm install
+pnpm build
+node dist/server/index.js scanner-suite.toml
+
+# submit a scan and poll it:
+curl -sS -X POST --data-binary @skill.zip -H 'content-type: application/zip' \
+  http://127.0.0.1:8080/scans
+curl -sS http://127.0.0.1:8080/scans/<jobId>
+```
+
+Scanners are disabled unless enabled in the TOML. `SOCKET_API_KEY` comes from
+the environment — secrets never go in the config file.
 
 ## Development
 

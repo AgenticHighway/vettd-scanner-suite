@@ -1,0 +1,37 @@
+# vettd-scanner-suite configuration.
+#
+# Copy to scanner-suite.toml (gitignored) and adjust. Secrets NEVER go in this
+# file — the Socket API key is read from the SOCKET_API_KEY environment
+# variable. Scanners are disabled unless explicitly enabled below.
+
+[server]
+host = "127.0.0.1"
+port = 8080
+
+[jobs]
+# Scan jobs running simultaneously.
+max_concurrent = 2
+# Per-scanner hard timeout within a job.
+scanner_timeout_ms = 120000
+
+[scanners.vettd]
+# First-party skill scanner, reached via its Rust HTTP shim (the http-shim
+# crate in the vettd-skill-scanner repo). Start it with: cargo run -p http-shim
+enabled = true
+shim_url = "http://127.0.0.1:8788"
+health_timeout_ms = 2000
+scan_timeout_ms = 30000
+
+[scanners.cisco]
+# Cisco AI Defense, reached via the bundled Python shim (shims/cisco/server.py).
+enabled = false
+shim_url = "http://127.0.0.1:8787"
+health_timeout_ms = 2000
+scan_timeout_ms = 30000
+# Waiters allowed beyond the single in-flight scan before runs are skipped.
+queue_depth = 50
+
+[scanners.socket]
+# Socket.dev dependency analysis (external SaaS; requires SOCKET_API_KEY).
+enabled = false
+timeout_ms = 30000

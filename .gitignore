@@ -151,6 +151,7 @@ vite.config.ts.timestamp-*
 
 # Local files
 .local/
+scanner-suite.toml
 
 # Python (bundled scanner shims, e.g. cisco-shim)
 __pycache__/

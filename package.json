@@ -2,6 +2,7 @@
 	"name": "vettd-scanner-suite",
 	"version": "0.1.0",
 	"private": true,
+	"type": "module",
 	"license": "UNLICENSED",
 	"description": "Unified scanner suite: orchestrates first-party and third-party scanners behind a normalized findings contract.",
 	"engines": {
@@ -12,9 +13,17 @@
 		"build": "tsc",
 		"lint": "eslint src",
 		"typecheck": "tsc -p tsconfig.test.json",
-		"test": "vitest run"
+		"test": "vitest run",
+		"start": "node dist/server/index.js"
+	},
+	"dependencies": {
+		"fastify": "^5.6.2",
+		"jszip": "^3.10.1",
+		"pino": "^9.14.0",
+		"smol-toml": "^1.4.2"
 	},
 	"devDependencies": {
+		"pino-pretty": "^13.1.2",
 		"@types/node": "^25.5.2",
 		"@typescript-eslint/eslint-plugin": "^8.59.2",
 		"@typescript-eslint/parser": "^8.59.2",

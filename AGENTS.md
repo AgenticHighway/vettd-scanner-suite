@@ -5,16 +5,28 @@ safely in this repository.
 
 ## Project overview
 
-- `vettd-scanner-suite` orchestrates first-party and third-party scanners
-  behind a single normalized findings contract.
+- `vettd-scanner-suite` is a standalone Fastify HTTP service that
+  orchestrates first-party and third-party scanners behind a single
+  normalized findings contract (async job model: POST zip → poll job).
 - Consumers: the `vettd` web app's scanning backend (cloud), and a
-  distributable Docker image for local/power-user runs.
-- **Status: early scaffolding.** No application code has landed yet — this
-  section and "Repo shape" below will be filled in once it does.
+  distributable Docker image for local/power-user runs (Docker not built yet).
+- Configuration is a TOML file (`scanner-suite.example.toml`); scanners are
+  disabled unless explicitly enabled. Secrets (e.g. `SOCKET_API_KEY`) stay in
+  env vars, never in the config file or git.
 
 ## Repo shape
 
-- TBD — to be filled in once scanner adapters and the orchestrator land.
+- `src/contract/` — canonical findings contract; changes here are wire-format
+  changes requiring coordination with vettd web (see docs/design.md)
+- `src/config/` — TOML schema/loading; fail-fast validation
+- `src/intake/` — zip extraction and validation
+- `src/core/` — runner fan-out, registry, job store/executor
+- `src/adapters/` — per-scanner normalization; adapters for ALL scanners live
+  here, as config-taking factories (no module-level env/config reads)
+- `src/server/` — Fastify app + entry point
+- `shims/cisco/` — Python shim for the cisco pip package (third-party shims
+  live in this repo; first-party shims live in the scanner's own repo)
+- `docs/design.md` — architecture, config reference, how to add a scanner
 
 ## Working norms
 
