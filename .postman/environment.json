@@ -1,0 +1,13 @@
+{
+	"id": "vettd-scanner-suite-local",
+	"name": "vettd-scanner-suite (local)",
+	"values": [
+		{
+			"key": "baseUrl",
+			"value": "http://127.0.0.1:8080",
+			"type": "default",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment"
+}

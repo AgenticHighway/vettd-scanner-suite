@@ -1,0 +1,421 @@
+{
+	"info": {
+		"_postman_id": "e7a1f6d2-9b3a-4b7e-9c4a-1f2e3d4c5b6a",
+		"name": "vettd-scanner-suite smoke tests",
+		"description": "Smoke tests for the vettd-scanner-suite HTTP API (issue #7). Retarget to any environment by switching the `baseUrl` environment variable — no requests here should ever hardcode a host.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{"key": "jobId", "value": ""},
+		{"key": "pollAttempts", "value": "0"}
+	],
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "GET /health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": ["{{baseUrl}}"],
+							"path": ["health"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"body is {ok: true}\", function () {",
+									"    pm.expect(pm.response.json()).to.eql({ok: true});",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Happy path",
+			"item": [
+				{
+					"name": "Submit seeded skill: minimal",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/zip"}
+						],
+						"body": {
+							"mode": "file",
+							"file": {"src": "fixtures/minimal-skill.zip"}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 202\", function () {",
+									"    pm.response.to.have.status(202);",
+									"});",
+									"",
+									"const body = pm.response.json();",
+									"pm.test(\"response has jobId and queued status\", function () {",
+									"    pm.expect(body.jobId).to.be.a(\"string\").and.not.empty;",
+									"    pm.expect(body.status).to.eql(\"queued\");",
+									"});",
+									"",
+									"pm.collectionVariables.set(\"jobId\", body.jobId);",
+									"pm.collectionVariables.set(\"pollAttempts\", \"0\");"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Poll job: minimal",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{jobId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "{{jobId}}"]
+						},
+						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 30 attempts). This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const MAX_ATTEMPTS = 30;",
+									"",
+									"let attempts = parseInt(pm.collectionVariables.get(\"pollAttempts\") || \"0\", 10) + 1;",
+									"pm.collectionVariables.set(\"pollAttempts\", String(attempts));",
+									"",
+									"pm.test(\"status 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"const body = pm.response.json();",
+									"",
+									"pm.test(\"job id echoes request\", function () {",
+									"    pm.expect(body.id).to.eql(pm.collectionVariables.get(\"jobId\"));",
+									"});",
+									"pm.test(\"status is a known value\", function () {",
+									"    pm.expect([\"queued\", \"running\", \"completed\", \"failed\"]).to.include(body.status);",
+									"});",
+									"",
+									"if (body.status === \"queued\" || body.status === \"running\") {",
+									"    if (attempts < MAX_ATTEMPTS) {",
+									"        postman.setNextRequest(pm.info.requestName);",
+									"    } else {",
+									"        pm.test(\"job reached a terminal state within \" + MAX_ATTEMPTS + \" polls\", function () {",
+									"            throw new Error(\"job still \\\"\" + body.status + \"\\\" after \" + MAX_ATTEMPTS + \" polls\");",
+									"        });",
+									"    }",
+									"} else {",
+									"    pm.test(\"submittedAt/startedAt/finishedAt are ISO-8601\", function () {",
+									"        const iso = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;",
+									"        pm.expect(body.submittedAt).to.match(iso);",
+									"        pm.expect(body.startedAt).to.match(iso);",
+									"        pm.expect(body.finishedAt).to.match(iso);",
+									"    });",
+									"",
+									"    if (body.status === \"completed\") {",
+									"        pm.test(\"results is an array\", function () {",
+									"            pm.expect(Array.isArray(body.results)).to.be.true;",
+									"        });",
+									"        pm.test(\"each result has a well-formed run and findings\", function () {",
+									"            for (const result of body.results) {",
+									"                pm.expect([\"success\", \"skipped\", \"errored\", \"timeout\"]).to.include(result.run.status);",
+									"                pm.expect(Array.isArray(result.findings)).to.be.true;",
+									"            }",
+									"        });",
+									"    } else if (body.status === \"failed\") {",
+									"        pm.test(\"failed job carries an error message\", function () {",
+									"            pm.expect(body.error).to.be.a(\"string\");",
+									"        });",
+									"    }",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Submit seeded skill: full",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/zip"}
+						],
+						"body": {
+							"mode": "file",
+							"file": {"src": "fixtures/full-skill.zip"}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 202\", function () {",
+									"    pm.response.to.have.status(202);",
+									"});",
+									"",
+									"const body = pm.response.json();",
+									"pm.test(\"response has jobId and queued status\", function () {",
+									"    pm.expect(body.jobId).to.be.a(\"string\").and.not.empty;",
+									"    pm.expect(body.status).to.eql(\"queued\");",
+									"});",
+									"",
+									"pm.collectionVariables.set(\"jobId\", body.jobId);",
+									"pm.collectionVariables.set(\"pollAttempts\", \"0\");"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Poll job: full",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/{{jobId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "{{jobId}}"]
+						},
+						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 30 attempts). This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const MAX_ATTEMPTS = 30;",
+									"",
+									"let attempts = parseInt(pm.collectionVariables.get(\"pollAttempts\") || \"0\", 10) + 1;",
+									"pm.collectionVariables.set(\"pollAttempts\", String(attempts));",
+									"",
+									"pm.test(\"status 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"const body = pm.response.json();",
+									"",
+									"pm.test(\"job id echoes request\", function () {",
+									"    pm.expect(body.id).to.eql(pm.collectionVariables.get(\"jobId\"));",
+									"});",
+									"pm.test(\"status is a known value\", function () {",
+									"    pm.expect([\"queued\", \"running\", \"completed\", \"failed\"]).to.include(body.status);",
+									"});",
+									"",
+									"if (body.status === \"queued\" || body.status === \"running\") {",
+									"    if (attempts < MAX_ATTEMPTS) {",
+									"        postman.setNextRequest(pm.info.requestName);",
+									"    } else {",
+									"        pm.test(\"job reached a terminal state within \" + MAX_ATTEMPTS + \" polls\", function () {",
+									"            throw new Error(\"job still \\\"\" + body.status + \"\\\" after \" + MAX_ATTEMPTS + \" polls\");",
+									"        });",
+									"    }",
+									"} else {",
+									"    pm.test(\"submittedAt/startedAt/finishedAt are ISO-8601\", function () {",
+									"        const iso = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;",
+									"        pm.expect(body.submittedAt).to.match(iso);",
+									"        pm.expect(body.startedAt).to.match(iso);",
+									"        pm.expect(body.finishedAt).to.match(iso);",
+									"    });",
+									"",
+									"    if (body.status === \"completed\") {",
+									"        pm.test(\"results is an array\", function () {",
+									"            pm.expect(Array.isArray(body.results)).to.be.true;",
+									"        });",
+									"        pm.test(\"each result has a well-formed run and findings\", function () {",
+									"            for (const result of body.results) {",
+									"                pm.expect([\"success\", \"skipped\", \"errored\", \"timeout\"]).to.include(result.run.status);",
+									"                pm.expect(Array.isArray(result.findings)).to.be.true;",
+									"            }",
+									"        });",
+									"    } else if (body.status === \"failed\") {",
+									"        pm.test(\"failed job carries an error message\", function () {",
+									"            pm.expect(body.error).to.be.a(\"string\");",
+									"        });",
+									"    }",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Error paths",
+			"item": [
+				{
+					"name": "POST /scans, empty body -> 400",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/zip"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 400\", function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test(\"error mentions empty body\", function () {",
+									"    const body = pm.response.json();",
+									"    pm.expect(body.error).to.include(\"empty body\");",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "POST /scans, bad zip -> 400",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/zip"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "not a zip"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 400\", function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test(\"error mentions failed to read zip archive\", function () {",
+									"    const body = pm.response.json();",
+									"    pm.expect(body.error).to.include(\"Failed to read zip archive\");",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "POST /scans, wrong content-type -> 415",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/xml"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "<zip/>"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 415\", function () {",
+									"    pm.response.to.have.status(415);",
+									"});",
+									"",
+									"pm.test(\"uses fastify's default error shape\", function () {",
+									"    const body = pm.response.json();",
+									"    pm.expect(body.statusCode).to.eql(415);",
+									"    pm.expect(body).to.have.property(\"error\");",
+									"    pm.expect(body).to.have.property(\"message\");",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "GET /scans/:id, unknown job -> 404",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/00000000-0000-0000-0000-000000000000",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "00000000-0000-0000-0000-000000000000"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 404\", function () {",
+									"    pm.response.to.have.status(404);",
+									"});",
+									"",
+									"pm.test(\"body is job-not-found error\", function () {",
+									"    pm.expect(pm.response.json()).to.eql({error: \"job not found\"});",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

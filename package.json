@@ -14,7 +14,8 @@
 		"lint": "eslint src",
 		"typecheck": "tsc -p tsconfig.test.json",
 		"test": "vitest run",
-		"start": "node dist/server/index.js"
+		"start": "node dist/server/index.js",
+		"postman": "newman run .postman/collection.json -e .postman/environment.json --working-dir .postman"
 	},
 	"dependencies": {
 		"fastify": "^5.6.2",
@@ -28,6 +29,7 @@
 		"@typescript-eslint/eslint-plugin": "^8.59.2",
 		"@typescript-eslint/parser": "^8.59.2",
 		"eslint": "^9.39.4",
+		"newman": "^6.2.2",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.5"
 	}

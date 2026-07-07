@@ -21,6 +21,7 @@ Architecture details: [docs/design.md](docs/design.md).
 | `src/adapters/` | Per-scanner normalization (vettd, cisco, socket, SARIF mapping) |
 | `src/server/` | Fastify app and service entry point |
 | `shims/cisco/` | Python shim wrapping the `cisco-ai-skill-scanner` pip package |
+| `.postman/` | Postman smoke-test collection; see `.postman/README.md` |
 | `docs/` | Design docs |
 
 ## Quickstart
