@@ -32,6 +32,11 @@ node dist/server/index.js scanner-suite.example.toml   # or your own config
    single request manually will not exercise the `GET /scans/:id` polling
    loop — `postman.setNextRequest` only takes effect inside a Runner or
    newman run.
+5. Set a per-request delay of at least `500` ms in the Collection Runner's
+   "Delay" field. Without it, all 60 poll attempts fire in well under a
+   second — faster than an unreachable/degrading scanner's health-check
+   timeout can even elapse once, so the loop gives up on a job that's still
+   legitimately running.
 
 ## Run headlessly with newman
 
@@ -42,8 +47,13 @@ pnpm postman
 Equivalent to:
 
 ```bash
-npx newman run .postman/collection.json -e .postman/environment.json --working-dir .postman
+npx newman run .postman/collection.json -e .postman/environment.json --working-dir .postman --delay-request 500
 ```
+
+The `--delay-request 500` is required for the same reason as the GUI's Delay
+setting above — it's what gives a slow-to-respond or intentionally-unreachable
+scanner shim real wall-clock time to hit its own timeout before the poll loop
+gives up.
 
 ## Retargeting to another environment
 

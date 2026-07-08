@@ -4,7 +4,7 @@
 # "Local deployment (Docker Compose)".
 
 [server]
-host = "0.0.0.0"   # REQUIRED: 0.0.0.0, not the config-default 127.0.0.1 — the
+host = "0.0.0.0"    # REQUIRED: 0.0.0.0, not the config-default 127.0.0.1 — the
                     # suite's published port must be reachable from outside
                     # its own container. See docs/design.md for the general
                     # bind-address note (also applies to the shims).
@@ -16,7 +16,7 @@ scanner_timeout_ms = 120000
 
 [scanners.vettd]
 enabled = true
-shim_url = "http://vettd-shim:8788"   # compose service name, not localhost —
+shim_url = "http://vettd-shim:8788"    # compose service name, not localhost —
                                        # this is the seam that changes back to
                                        # 127.0.0.1 for the future single-image
                                        # bundle (co-located, shared loopback).
@@ -27,9 +27,9 @@ scan_timeout_ms = 30000
 # service exists (needs a Dockerfile, a pinned cisco-ai-skill-scanner
 # requirement, and shims/cisco/server.py's bind-address fix — see
 # docs/design.md).
-# [scanners.cisco]
-# enabled = true
-# shim_url = "http://cisco-shim:8787"
-# health_timeout_ms = 2000
-# scan_timeout_ms = 30000
-# queue_depth = 50
+[scanners.cisco]
+enabled = true
+shim_url = "http://cisco-shim:8787"
+health_timeout_ms = 2000
+scan_timeout_ms = 30000
+queue_depth = 50

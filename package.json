@@ -15,7 +15,7 @@
 		"typecheck": "tsc -p tsconfig.test.json",
 		"test": "vitest run",
 		"start": "node dist/server/index.js",
-		"postman": "newman run .postman/collection.json -e .postman/environment.json --working-dir .postman"
+		"postman": "newman run .postman/collection.json -e .postman/environment.json --working-dir .postman --delay-request 500"
 	},
 	"dependencies": {
 		"fastify": "^5.6.2",

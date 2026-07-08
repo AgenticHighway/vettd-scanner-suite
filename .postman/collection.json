@@ -97,7 +97,7 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["scans", "{{jobId}}"]
 						},
-						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 30 attempts). This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
+						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 60 attempts). Requires a per-request delay (newman: --delay-request; GUI: Collection Runner's Delay setting) — with no delay, all 60 attempts fire in well under a second, faster than an unreachable scanner shim's health-check timeout can even elapse once, so the loop gives up while the job is still legitimately running. This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
 					},
 					"event": [
 						{
@@ -105,7 +105,7 @@
 							"script": {
 								"type": "text/javascript",
 								"exec": [
-									"const MAX_ATTEMPTS = 30;",
+									"const MAX_ATTEMPTS = 60;",
 									"",
 									"let attempts = parseInt(pm.collectionVariables.get(\"pollAttempts\") || \"0\", 10) + 1;",
 									"pm.collectionVariables.set(\"pollAttempts\", String(attempts));",
@@ -147,6 +147,10 @@
 									"                pm.expect([\"success\", \"skipped\", \"errored\", \"timeout\"]).to.include(result.run.status);",
 									"                pm.expect(Array.isArray(result.findings)).to.be.true;",
 									"            }",
+									"        });",
+									"        pm.test(\"no scanner reports skipped\", function () {",
+									"            const skipped = body.results.filter((r) => r.run.status === \"skipped\").map((r) => r.run.source);",
+									"            pm.expect(skipped, \"scanners skipped: \" + skipped.join(\", \")).to.eql([]);",
 									"        });",
 									"    } else if (body.status === \"failed\") {",
 									"        pm.test(\"failed job carries an error message\", function () {",
@@ -209,7 +213,7 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["scans", "{{jobId}}"]
 						},
-						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 30 attempts). This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
+						"description": "Self-loops via postman.setNextRequest until the job reaches a terminal state (capped at 60 attempts). Requires a per-request delay (newman: --delay-request; GUI: Collection Runner's Delay setting) — with no delay, all 60 attempts fire in well under a second, faster than an unreachable scanner shim's health-check timeout can even elapse once, so the loop gives up while the job is still legitimately running. This only loops when run via the Collection Runner or newman — a single manual Send will not loop."
 					},
 					"event": [
 						{
@@ -217,7 +221,7 @@
 							"script": {
 								"type": "text/javascript",
 								"exec": [
-									"const MAX_ATTEMPTS = 30;",
+									"const MAX_ATTEMPTS = 60;",
 									"",
 									"let attempts = parseInt(pm.collectionVariables.get(\"pollAttempts\") || \"0\", 10) + 1;",
 									"pm.collectionVariables.set(\"pollAttempts\", String(attempts));",
@@ -259,6 +263,10 @@
 									"                pm.expect([\"success\", \"skipped\", \"errored\", \"timeout\"]).to.include(result.run.status);",
 									"                pm.expect(Array.isArray(result.findings)).to.be.true;",
 									"            }",
+									"        });",
+									"        pm.test(\"no scanner reports skipped\", function () {",
+									"            const skipped = body.results.filter((r) => r.run.status === \"skipped\").map((r) => r.run.source);",
+									"            pm.expect(skipped, \"scanners skipped: \" + skipped.join(\", \")).to.eql([]);",
 									"        });",
 									"    } else if (body.status === \"failed\") {",
 									"        pm.test(\"failed job carries an error message\", function () {",
