@@ -23,6 +23,7 @@ Architecture details: [docs/design.md](docs/design.md).
 | `shims/cisco/` | Python shim wrapping the `cisco-ai-skill-scanner` pip package |
 | `.postman/` | Postman smoke-test collection; see `.postman/README.md` |
 | `docs/` | Design docs |
+| `compose.yaml` | Docker Compose local deployment (suite + vettd shim); see `docs/design.md` |
 
 ## Quickstart
 
@@ -45,6 +46,17 @@ curl -sS http://127.0.0.1:8080/scans/<jobId>
 
 Scanners are disabled unless enabled in the TOML. `SOCKET_API_KEY` comes from
 the environment — secrets never go in the config file.
+
+### Quickstart (Docker Compose)
+
+Runs the suite and the first-party vettd scanner as containers, no local Rust
+toolchain needed (requires a sibling checkout of `vettd-skill-scanner` — see
+`docs/design.md` for why and for the cisco/bundle status):
+
+```bash
+docker compose up --build
+curl -sS http://127.0.0.1:8080/health
+```
 
 ## Development
 

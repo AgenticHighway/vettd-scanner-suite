@@ -1,0 +1,53 @@
+# Local dev deployment (issue #12) — one container per component, wired over
+# the compose network. See docs/design.md "Local deployment (Docker Compose)"
+# for the reasoning (independent rebuilds/failure isolation vs. the deferred
+# single-image bundle).
+services:
+  suite:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/scanner-suite.docker.toml:/config/scanner-suite.toml:ro
+    # Uncomment to enable the socket scanner (also requires
+    # scanners.socket.enabled = true in the mounted config):
+    # environment:
+    #   SOCKET_API_KEY: ${SOCKET_API_KEY:-}
+    #
+    # Do NOT set LOG_PRETTY here: pino-pretty is a devDependency
+    # (src/logger.ts), pruned out of this image's runtime stage — enabling it
+    # crashes the suite on boot. Plain JSON logs are the right default for a
+    # containerized runtime anyway.
+    depends_on:
+      - vettd-shim
+
+  vettd-shim:
+    # NOTE(vettd-scanner-suite#12): builds from a sibling checkout of
+    # vettd-skill-scanner for fast local iteration on the first-party
+    # scanner. This is the seam to swap for a pinned published image
+    # (e.g. `image: ghcr.io/agentichighway/vettd-http-shim:<tag>`) in the
+    # future single-image bundle or in remote dev/prod (#4, #5).
+    build:
+      context: ../vettd-skill-scanner
+    environment:
+      VETTD_SHIM_BIND: "0.0.0.0"   # required for cross-container reachability
+      VETTD_SHIM_PORT: "8788"
+    # Uncomment to reach the shim directly (debugging only — the suite is the
+    # intended caller, over the compose network via the service name).
+    # ports:
+    #   - "8788:8788"
+
+  # TODO(vettd-scanner-suite#12 cisco): scaffolded, not wired up yet. Needs:
+  #   - shims/cisco/Dockerfile (pin cisco-ai-skill-scanner; no requirements
+  #     file exists anywhere yet for this dependency)
+  #   - shims/cisco/server.py's hardcoded 127.0.0.1 bind fixed the same way
+  #     as crates/http-shim/src/main.rs (VETTD_SHIM_BIND precedent ->
+  #     CISCO_SHIM_BIND)
+  #   - uncomment [scanners.cisco] in deploy/scanner-suite.docker.toml
+  # cisco-shim:
+  #   build:
+  #     context: .
+  #     dockerfile: shims/cisco/Dockerfile
+  #   environment:
+  #     CISCO_SHIM_BIND: "0.0.0.0"
+  #     CISCO_SHIM_PORT: "8787"
