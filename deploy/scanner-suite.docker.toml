@@ -23,13 +23,9 @@ shim_url = "http://vettd-shim:8788"    # compose service name, not localhost —
 health_timeout_ms = 2000
 scan_timeout_ms = 30000
 
-# TODO(vettd-scanner-suite#12 cisco): enable once the cisco-shim compose
-# service exists (needs a Dockerfile, a pinned cisco-ai-skill-scanner
-# requirement, and shims/cisco/server.py's bind-address fix — see
-# docs/design.md).
 [scanners.cisco]
 enabled = true
-shim_url = "http://cisco-shim:8787"
+shim_url = "http://cisco-shim:8787"    # compose service name, not localhost
 health_timeout_ms = 2000
 scan_timeout_ms = 30000
 queue_depth = 50

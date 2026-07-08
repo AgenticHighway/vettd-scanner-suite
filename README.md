@@ -49,9 +49,10 @@ the environment — secrets never go in the config file.
 
 ### Quickstart (Docker Compose)
 
-Runs the suite and the first-party vettd scanner as containers, no local Rust
-toolchain needed (requires a sibling checkout of `vettd-skill-scanner` — see
-`docs/design.md` for why and for the cisco/bundle status):
+Runs the suite, the first-party vettd scanner, and the cisco scanner as
+containers — no local Rust or Python toolchain needed (the vettd scanner
+requires a sibling checkout of `vettd-skill-scanner`; see `docs/design.md` for
+why, and for the deferred single-image bundle status):
 
 ```bash
 docker compose up --build

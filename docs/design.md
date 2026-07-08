@@ -149,25 +149,23 @@ differ.
   is only reachable inside its own container) and points
   `scanners.vettd.shim_url` at the compose service hostname
   (`http://vettd-shim:8788`) instead of `127.0.0.1`.
-- **The vettd shim's bind address is also not `127.0.0.1` by default across
+- **Both shims' bind addresses are also not `127.0.0.1` by default across
   containers.** `crates/http-shim/src/main.rs` (in the sibling
-  `vettd-skill-scanner` repo) now reads an optional `VETTD_SHIM_BIND` env var
-  (default still `127.0.0.1`, unchanged for bare-metal/CLI use); compose sets
-  it to `0.0.0.0`. Any future scanner shim added to compose needs the same
-  treatment — see the commented cisco scaffold in `compose.yaml` for the
-  pattern to follow (`CISCO_SHIM_BIND`, not yet implemented).
+  `vettd-skill-scanner` repo) reads an optional `VETTD_SHIM_BIND` env var, and
+  `shims/cisco/server.py` reads `CISCO_SHIM_BIND` (default still `127.0.0.1`
+  for both, unchanged for bare-metal/CLI use); compose sets both to `0.0.0.0`.
+  Any future scanner shim added to compose needs the same treatment.
 - **Fast iteration on the first-party scanner**: `vettd-shim`'s compose build
   context is `../vettd-skill-scanner` — a sibling checkout, not a published
   image. Edit that repo, then `docker compose build vettd-shim && docker
   compose up -d vettd-shim` rebuilds/restarts only that service; the suite
   container is untouched. This is the seam to swap for a pinned published
   image (`image: ghcr.io/...`) in remote environments or the future bundle.
-- **Cisco is scaffolded, not wired up.** Its compose service, Dockerfile, and
-  `deploy/scanner-suite.docker.toml`'s `[scanners.cisco]` block are all
-  present but commented out (see `TODO(vettd-scanner-suite#12 cisco)` markers)
-  — blocked on pinning `cisco-ai-skill-scanner` (no requirements file exists
-  for it anywhere yet) and the same bind-address fix in
-  `shims/cisco/server.py`.
+- **Cisco runs as a real compose service.** `shims/cisco/Dockerfile` installs
+  `cisco-ai-skill-scanner` (range-pinned in `shims/cisco/requirements.txt`)
+  into a `python:3.12-slim` image; `[scanners.cisco]` in
+  `deploy/scanner-suite.docker.toml` is enabled and points at
+  `http://cisco-shim:8787`.
 - **Degradation still holds**: stopping/killing a shim container makes its
   scanner report `run.status: "skipped"`, same as an unreachable localhost
   shim — the job still completes (see "Job lifecycle" above).

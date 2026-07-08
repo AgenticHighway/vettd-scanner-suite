@@ -14,7 +14,9 @@ adapter enforces concurrency=1 via an async mutex — only one scan request
 reaches this shim at a time.
 
 Run standalone (python3 shims/cisco/server.py); the suite's cisco adapter
-connects to it via [scanners.cisco].shim_url in scanner-suite.toml.
+connects to it via [scanners.cisco].shim_url in scanner-suite.toml. Binds to
+127.0.0.1 by default; set CISCO_SHIM_BIND=0.0.0.0 to accept connections from
+other containers (e.g. the Docker Compose deployment).
 """
 
 import importlib.metadata
@@ -157,9 +159,10 @@ class ShimHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    server = HTTPServer(("127.0.0.1", PORT), ShimHandler)
-    log.info("listening on 127.0.0.1:%d (cisco-ai-skill-scanner %s)",
-             PORT, _SCANNER_VERSION)
+    HOST = os.environ.get("CISCO_SHIM_BIND", "127.0.0.1")
+    server = HTTPServer((HOST, PORT), ShimHandler)
+    log.info("listening on %s:%d (cisco-ai-skill-scanner %s)",
+             HOST, PORT, _SCANNER_VERSION)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
