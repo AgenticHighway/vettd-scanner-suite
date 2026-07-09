@@ -63,7 +63,7 @@ describe("POST /scans", () => {
 
 	// Malformed bodies must fail the submit itself — the caller should never
 	// have to poll to find out their JSON was rejected.
-	it("responds 400 for invalid JSON (Fastify parse error)", async () => {
+	it("responds 400 for invalid JSON", async () => {
 		const {app} = makeApp();
 		const res = await app.inject({
 			method: "POST",
@@ -72,10 +72,7 @@ describe("POST /scans", () => {
 			headers: {"content-type": "application/json"},
 		});
 		expect(res.statusCode).toBe(400);
-		// Fastify parses application/json natively — invalid JSON is a 400
-		// from the framework before our handler ever sees the body.
-		const body = res.json() as {message?: string; statusCode?: number};
-		expect(body.statusCode).toBe(400);
+		expect((res.json() as {error: string}).error).toContain("malformed");
 	});
 
 	it("responds 400 for an empty body", async () => {

@@ -1,4 +1,4 @@
-import Fastify, {type FastifyBaseLogger, type FastifyInstance} from "fastify";
+import Fastify, {type FastifyBaseLogger, type FastifyInstance, type FastifyRequest} from "fastify";
 
 import {MAX_BODY_BYTES, MAX_FILES, MAX_TEXT_FILE_BYTES, MAX_TOTAL_TEXT_BYTES} from "../consts.js";
 import type {ScannerInput} from "../contract/scanner.js";
@@ -19,6 +19,24 @@ interface SubmitBody {
 	allPaths: string[];
 }
 
+// Custom content-type parser for application/json. Captures the raw body as a
+// string instead of letting Fastify parse it — so our handler can distinguish
+// "invalid JSON" from "valid JSON with bad shape" and return its own 400
+// message instead of Fastify's generic "Body is not valid JSON" response.
+function jsonBodyParser(
+	_req: FastifyRequest,
+	payload: NodeJS.ReadableStream,
+	done: (err: Error | null, body: string) => void,
+) {
+	const chunks: Buffer[] = [];
+	payload.on("data", (chunk: Buffer) => chunks.push(chunk));
+	payload.on("end", () => {
+		const raw = Buffer.concat(chunks).toString("utf8");
+		done(null, raw);
+	});
+	payload.on("error", (err: Error) => done(err, ""));
+}
+
 // App-level errors respond {error: string}; framework-generated errors
 // (413 oversize, 415 unknown content type, 500) keep fastify's default
 // {statusCode, error, message} shape — documented in docs/design.md.
@@ -27,21 +45,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 	// FastifyInstance (fastify parameterizes its generics by the logger type).
 	const app = Fastify({loggerInstance: logger as FastifyBaseLogger, bodyLimit: MAX_BODY_BYTES});
 
+	// Override Fastify's default JSON parser so our handler sees the raw
+	// body string and can return its own 400 for malformed JSON.
+	app.addContentTypeParser("application/json", {}, jsonBodyParser);
+
 	app.get("/health", async () => ({ok: true}));
 
 	app.post("/scans", async (request, reply) => {
-		const raw = request.body;
+		const raw = request.body as string | undefined;
 
-		// Fastify parses application/json by default. Anything that failed to
-		// parse (bad JSON, unsupported content-type) arrives as the parsed
-		// default or the raw buffer — both rejected below.
-		if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) {
+		if (raw === undefined || raw === null || raw.length === 0) {
 			return reply.code(400).send({error: "empty or missing body — POST a JSON object {textFiles, allPaths}"});
+		}
+
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			return reply.code(400).send({error: "malformed body — expected {textFiles: Record<string,string>, allPaths: string[]}"});
 		}
 
 		let body: SubmitBody;
 		try {
-			body = raw as SubmitBody;
+			body = parsed as SubmitBody;
 		} catch {
 			return reply.code(400).send({error: "malformed body — expected {textFiles: Record<string,string>, allPaths: string[]}"});
 		}
