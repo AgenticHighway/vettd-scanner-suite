@@ -49,7 +49,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 	// body string and can return its own 400 for malformed JSON.
 	app.addContentTypeParser("application/json", {}, jsonBodyParser);
 
-	app.get("/health", async () => ({ok: true}));
+	// logLevel: "debug" — this route is hit every 10s by Docker HEALTHCHECK
+	// (and polled before every scan by adapters' available() checks), so its
+	// automatic request/response logs would otherwise flood info-level output.
+	app.get("/health", {logLevel: "debug"}, async () => ({ok: true}));
 
 	app.post("/scans", async (request, reply) => {
 		const raw = request.body as string | undefined;
