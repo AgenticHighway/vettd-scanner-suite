@@ -48,15 +48,15 @@
 			"name": "Happy path",
 			"item": [
 				{
-					"name": "Submit seeded skill: minimal",
+					"name": "Submit minimal skill (JSON)",
 					"request": {
 						"method": "POST",
 						"header": [
-							{"key": "Content-Type", "value": "application/zip"}
+							{"key": "Content-Type", "value": "application/json"}
 						],
 						"body": {
-							"mode": "file",
-							"file": {"src": "fixtures/minimal-skill.zip"}
+							"mode": "raw",
+							"raw": "{\"textFiles\":{\"SKILL.md\":\"# Skill\"},\"allPaths\":[\"SKILL.md\"]}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/scans",
@@ -164,15 +164,15 @@
 					]
 				},
 				{
-					"name": "Submit seeded skill: full",
+					"name": "Submit full skill (JSON)",
 					"request": {
 						"method": "POST",
 						"header": [
-							{"key": "Content-Type", "value": "application/zip"}
+							{"key": "Content-Type", "value": "application/json"}
 						],
 						"body": {
-							"mode": "file",
-							"file": {"src": "fixtures/full-skill.zip"}
+							"mode": "raw",
+							"raw": "{\"textFiles\":{\"SKILL.md\":\"# Skill\\n\\nFull skill with scripts and references.\",\"README.md\":\"## Full skill\\n\\nWith scripts and references.\\n\\n## Scripts\\n\\n- lint.sh\\n- test.sh\\n\\n## References\\n\\n- [docs](https://example.com)\"},\"allPaths\":[\"SKILL.md\",\"README.md\",\"scripts/lint.sh\",\"scripts/test.sh\"]}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/scans",
@@ -289,7 +289,7 @@
 					"request": {
 						"method": "POST",
 						"header": [
-							{"key": "Content-Type", "value": "application/zip"}
+							{"key": "Content-Type", "value": "application/json"}
 						],
 						"body": {
 							"mode": "raw",
@@ -313,7 +313,7 @@
 									"",
 									"pm.test(\"error mentions empty body\", function () {",
 									"    const body = pm.response.json();",
-									"    pm.expect(body.error).to.include(\"empty body\");",
+									"    pm.expect(body.error).to.include(\"empty\");",
 									"});"
 								]
 							}
@@ -321,15 +321,15 @@
 					]
 				},
 				{
-					"name": "POST /scans, bad zip -> 400",
+					"name": "POST /scans, malformed JSON -> 400",
 					"request": {
 						"method": "POST",
 						"header": [
-							{"key": "Content-Type", "value": "application/zip"}
+							{"key": "Content-Type", "value": "application/json"}
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "not a zip"
+							"raw": "{not valid json"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/scans",
@@ -347,9 +347,9 @@
 									"    pm.response.to.have.status(400);",
 									"});",
 									"",
-									"pm.test(\"error mentions failed to read zip archive\", function () {",
+									"pm.test(\"error mentions malformed\", function () {",
 									"    const body = pm.response.json();",
-									"    pm.expect(body.error).to.include(\"Failed to read zip archive\");",
+									"    pm.expect(body.error).to.include(\"malformed\");",
 									"});"
 								]
 							}

@@ -10,7 +10,7 @@ The suite is a standalone Fastify HTTP service that orchestrates scanners and
 normalizes their output to one findings contract:
 
 ```
-client ── POST /scans (zip) ──▶ intake (extract/validate) ──▶ job store/executor
+client ── POST /scans (JSON) ──▶ validate (size/file-count) ──▶ job store/executor
                                                                     │
                     ┌── runner fan-out (per-scanner timeout) ◀──────┘
                     │
@@ -73,11 +73,7 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
                                   └──▶ failed (infrastructure error only)
 ```
 
-- Submissions are raw zip bodies; extraction/validation happens **inline at
-  intake** so a bad archive fails the request with a 400 immediately.
-  Limits (see `src/consts.ts`): 50 MB zip, 500 files, 75 MB uncompressed,
-  4 MB per text file, 16 MB total text — matching vettd web's extractor so
-  both sides of the cutover accept the same archives.
+- Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`.
 - The job store is **in-memory behind the narrow `JobStore` interface**
   (`create`/`get`/`transition`/`attachResults`) — the seam for a future
   durable store (SQS/DB). A restart loses jobs; callers see a 404 on poll and
@@ -96,7 +92,7 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
 | Route | Success | Errors |
 |---|---|---|
 | `GET /health` | `200 {ok: true}` | — |
-| `POST /scans` (zip body) | `202 {jobId, status}` | `400` bad/oversized-content zip or empty body, `413` over bodyLimit, `415` unregistered content type, `429` store full |
+| `POST /scans` (JSON body) | `202 {jobId, status}` | `400` malformed body, missing fields, oversized (file count / per-file bytes / total bytes), `413` over bodyLimit, `415` unregistered content type, `429` store full |
 | `GET /scans/:id` | `200` job envelope | `404` unknown/evicted id |
 
 App-level errors respond `{error: string}`; fastify-generated errors (413,

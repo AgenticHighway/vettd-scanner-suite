@@ -16,7 +16,6 @@ Architecture details: [docs/design.md](docs/design.md).
 |---|---|
 | `src/contract/` | Canonical findings contract (`AssetFinding`, scanner interfaces) |
 | `src/config/` | TOML config schema, loading, validation |
-| `src/intake/` | Zip extraction and validation |
 | `src/core/` | Runner fan-out, config-driven registry, job store/executor |
 | `src/adapters/` | Per-scanner normalization (vettd, cisco, socket, SARIF mapping) |
 | `src/server/` | Fastify app and service entry point |
@@ -39,7 +38,8 @@ pnpm build
 node dist/server/index.js scanner-suite.toml
 
 # submit a scan and poll it:
-curl -sS -X POST --data-binary @skill.zip -H 'content-type: application/zip' \
+curl -sS -X POST -H 'content-type: application/json' \
+  -d '{"textFiles":{"SKILL.md":"# Skill"},"allPaths":["SKILL.md"]}' \
   http://127.0.0.1:8080/scans
 curl -sS http://127.0.0.1:8080/scans/<jobId>
 ```

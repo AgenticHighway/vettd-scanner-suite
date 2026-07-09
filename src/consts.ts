@@ -5,12 +5,14 @@ export const SERVICE_NAME = "vettd-scanner-suite";
 
 export const DEFAULT_CONFIG_PATH = "./scanner-suite.toml";
 
-// ─── Zip intake limits ───────────────────────────────────────────────────────
-// Enforced in intake/zip.ts; MAX_ZIP_SIZE doubles as the fastify bodyLimit in
-// server/app.ts. Values match vettd web's extractZipFiles so both sides of the
-// cutover accept the same archives.
-export const MAX_ZIP_SIZE = 50 * 1024 * 1024;
+// ─── Submit (JSON) intake limits ─────────────────────────────────────────────
+// Enforced in server/app.ts on the JSON body: number of files (allPaths),
+// size of each text file value, and total text bytes. These mirror the limits
+// the old zip path enforced (see src/intake/zip.ts, removed in #13).
 export const MAX_FILES = 500;
-export const MAX_UNCOMPRESSED_ZIP_BYTES = 75 * 1024 * 1024;
 export const MAX_TEXT_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_TOTAL_TEXT_BYTES = 16 * 1024 * 1024;
+
+// Hard cap on the overall HTTP request body. Larger than MAX_TOTAL_TEXT_BYTES
+// to leave room for JSON overhead (keys, quotes, whitespace).
+export const MAX_BODY_BYTES = 20 * 1024 * 1024;
