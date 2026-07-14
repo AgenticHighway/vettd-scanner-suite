@@ -1,0 +1,198 @@
+# ──────────────────────────────────────────────────────────────────────
+# Deploy Dev (issue #15) — remote dev deployment of the scanner suite.
+#
+# Builds and pushes the suite + cisco-shim images to ECR (vettd-shim is
+# published by vettd-skill-scanner's own workflow, not built here — see
+# docs/design.md), then deploys to the existing vettd dev EC2 box via SSM,
+# alongside (not folded into) vettd's own deploy-dev.yml. Both stacks join
+# the shared `vettd-dev-net` external Docker network on that box.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Deploy Dev
+
+on:
+    push:
+        branches: [dev]
+        paths:
+            - "src/**"
+            - "shims/**"
+            - "deploy/**"
+            - "compose.dev.yml"
+            - "Dockerfile"
+            - "package.json"
+            - "pnpm-lock.yaml"
+            - ".github/workflows/deploy-dev.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: deploy-dev
+    cancel-in-progress: true
+
+permissions:
+    id-token: write
+    contents: read
+
+env:
+    AWS_REGION: us-east-1
+    SUITE_ECR_REPO: vettd-scanner-suite
+    CISCO_SHIM_ECR_REPO: cisco-skill-scanner-shim
+    VETTD_SHIM_ECR_REPO: vettd-skill-scanner-shim
+
+jobs:
+    lint-and-test:
+        name: Lint, typecheck & test
+        runs-on: blacksmith-4vcpu-ubuntu-2204
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install Node
+              uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+              with:
+                  node-version: "24"
+
+            - name: Enable Corepack
+              run: corepack enable
+
+            - name: Install dependencies
+              run: pnpm install
+
+            - name: Lint
+              run: pnpm lint
+
+            - name: Typecheck
+              run: pnpm typecheck
+
+            - name: Test
+              run: pnpm test
+
+            - name: Build
+              run: pnpm build
+
+    build-and-deploy:
+        name: Build & Deploy to Dev
+        needs: lint-and-test
+        runs-on: blacksmith-2vcpu-ubuntu-2404
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Set up Blacksmith Docker builder
+              uses: useblacksmith/setup-docker-builder@3cd79a53752a93f62c273d2edb1403bc7fa6ac6e # v1
+              with:
+                  max-cache-size-mb: "10240"
+
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@fb7eb401298e393da51cdcb2feb1ed0183619014 # v6
+              with:
+                  role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/vettd-deploy-dev
+                  aws-region: ${{ env.AWS_REGION }}
+
+            - name: Login to Amazon ECR
+              id: ecr-login
+              uses: aws-actions/amazon-ecr-login@c962da2960ed15f492addc26fffa274485265950 # v2
+
+            - name: Build and push suite image
+              uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
+              with:
+                  context: .
+                  file: Dockerfile
+                  platforms: linux/arm64
+                  push: true
+                  tags: |
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:dev-${{ github.sha }}
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:dev-latest
+
+            - name: Build and push cisco-shim image
+              uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
+              with:
+                  context: .
+                  file: shims/cisco/Dockerfile
+                  platforms: linux/arm64
+                  push: true
+                  tags: |
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.CISCO_SHIM_ECR_REPO }}:dev-${{ github.sha }}
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.CISCO_SHIM_ECR_REPO }}:dev-latest
+
+            - name: Ensure dev instance is running
+              run: |
+                  set -euo pipefail
+                  INSTANCE_ID="${{ secrets.DEV_INSTANCE_ID }}"
+
+                  STATE=$(aws ec2 describe-instances \
+                    --instance-ids "$INSTANCE_ID" \
+                    --query 'Reservations[0].Instances[0].State.Name' \
+                    --output text)
+
+                  if [ "$STATE" != "running" ]; then
+                    echo "Starting dev instance..."
+                    aws ec2 start-instances --instance-ids "$INSTANCE_ID" > /dev/null
+                    aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
+                    echo "Waiting for SSM agent..."
+                    for i in $(seq 1 30); do
+                      SSM_STATUS=$(aws ssm describe-instance-information \
+                        --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+                        --query 'InstanceInformationList[0].PingStatus' \
+                        --output text 2>/dev/null || echo "Offline")
+                      [ "$SSM_STATUS" = "Online" ] && break
+                      sleep 2
+                    done
+                  fi
+
+            - name: Deploy to dev server
+              run: |
+                  set -euo pipefail
+                  INSTANCE_ID="${{ secrets.DEV_INSTANCE_ID }}"
+                  REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+                  SUITE_IMAGE="${REGISTRY}/${{ env.SUITE_ECR_REPO }}:dev-${{ github.sha }}"
+                  CISCO_SHIM_IMAGE="${REGISTRY}/${{ env.CISCO_SHIM_ECR_REPO }}:dev-${{ github.sha }}"
+                  VETTD_SHIM_IMAGE="${REGISTRY}/${{ env.VETTD_SHIM_ECR_REPO }}:dev-latest"
+
+                  # Send compose file + suite config to the instance (no git clone needed)
+                  COMPOSE_BASE=$(base64 -i compose.dev.yml)
+                  CONFIG_BASE=$(base64 -i deploy/scanner-suite.docker.toml)
+
+                  COMMAND_ID=$(aws ssm send-command \
+                    --instance-ids "$INSTANCE_ID" \
+                    --document-name "AWS-RunShellScript" \
+                    --timeout-seconds 300 \
+                    --parameters "commands=[
+                      \"cd /home/ec2-user/vettd-scanner-suite\",
+                      \"mkdir -p deploy\",
+                      \"echo '${COMPOSE_BASE}' | base64 -d > compose.dev.yml\",
+                      \"echo '${CONFIG_BASE}' | base64 -d > deploy/scanner-suite.docker.toml\",
+                      \"rm -f .env.dev\",
+                      \"echo 'SUITE_IMAGE=${SUITE_IMAGE}' >> .env.dev\",
+                      \"echo 'CISCO_SHIM_IMAGE=${CISCO_SHIM_IMAGE}' >> .env.dev\",
+                      \"echo 'VETTD_SHIM_IMAGE=${VETTD_SHIM_IMAGE}' >> .env.dev\",
+                      \"aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}\",
+                      \"docker compose --env-file .env.dev -f compose.dev.yml pull\",
+                      \"docker compose --env-file .env.dev -f compose.dev.yml down\",
+                      \"docker compose --env-file .env.dev -f compose.dev.yml up -d\",
+                      \"docker image prune -f\"
+                    ]" \
+                    --query 'Command.CommandId' \
+                    --output text)
+
+                  echo "SSM Command: $COMMAND_ID"
+
+                  # Wait for command to finish (up to 5 min)
+                  for i in $(seq 1 60); do
+                    STATUS=$(aws ssm get-command-invocation \
+                      --command-id "$COMMAND_ID" \
+                      --instance-id "$INSTANCE_ID" \
+                      --query 'Status' \
+                      --output text 2>/dev/null || echo "Pending")
+                    case "$STATUS" in
+                      Success) echo "✔ Deploy complete"; break ;;
+                      Failed|TimedOut|Cancelled)
+                        echo "::error::SSM command $STATUS"
+                        aws ssm get-command-invocation \
+                          --command-id "$COMMAND_ID" \
+                          --instance-id "$INSTANCE_ID" \
+                          --query 'StandardErrorContent' \
+                          --output text 2>/dev/null || true
+                        exit 1 ;;
+                    esac
+                    sleep 5
+                  done

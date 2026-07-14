@@ -1,0 +1,47 @@
+# Remote dev deployment (issue #15) — services pull pre-built images from
+# ECR instead of building locally (unlike compose.yaml, the local Compose
+# setup), and join the shared `vettd-dev-net` external network so vettd
+# web's separately deployed compose stack can reach the suite by service
+# name (http://suite:8080). See docs/design.md "Remote dev deployment".
+#
+# No ports are published to the host — suite and shims are reachable only
+# over vettd-dev-net, per the internal-only exposure decision on #4.
+#
+# Image tags are supplied via .env.dev (SUITE_IMAGE, VETTD_SHIM_IMAGE,
+# CISCO_SHIM_IMAGE), written by the deploy-dev workflow on every deploy.
+services:
+  suite:
+    image: ${SUITE_IMAGE:?}
+    volumes:
+      - ./deploy/scanner-suite.docker.toml:/config/scanner-suite.toml:ro
+    networks:
+      - vettd-dev-net
+    depends_on:
+      - vettd-shim
+      - cisco-shim
+    restart: unless-stopped
+
+  vettd-shim:
+    # Published by vettd-skill-scanner's own build/publish workflow — this
+    # repo does not build the shim image (see docs/design.md, decision on
+    # vettd-shim image source).
+    image: ${VETTD_SHIM_IMAGE:?}
+    environment:
+      VETTD_SHIM_BIND: "0.0.0.0"
+      VETTD_SHIM_PORT: "8788"
+    networks:
+      - vettd-dev-net
+    restart: unless-stopped
+
+  cisco-shim:
+    image: ${CISCO_SHIM_IMAGE:?}
+    environment:
+      CISCO_SHIM_BIND: "0.0.0.0"
+      CISCO_SHIM_PORT: "8787"
+    networks:
+      - vettd-dev-net
+    restart: unless-stopped
+
+networks:
+  vettd-dev-net:
+    external: true
