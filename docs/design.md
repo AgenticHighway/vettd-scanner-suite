@@ -166,6 +166,32 @@ differ.
   scanner report `run.status: "skipped"`, same as an unreachable localhost
   shim — the job still completes (see "Job lifecycle" above).
 
+## Remote dev deployment
+
+Decision recorded on [#4](https://github.com/AgenticHighway/vettd-scanner-suite/issues/4); implementation tracked by [#15](https://github.com/AgenticHighway/vettd-scanner-suite/issues/15).
+
+The suite (and its shims) run on the same EC2 box `vettd`'s own dev
+deployment already uses (`vettd`'s `docker-compose.server.yml` /
+`deploy-dev.yml`) — not a separate, dedicated instance. Deploys stay
+independent: this repo has its own compose file and its own push-triggered
+GitHub Actions workflow (targeting the same instance), rather than being
+folded into `vettd`'s deploy pipeline.
+
+- **Exposure**: internal-only. The suite has no authn/z surface (see "Out of
+  scope" below), so it is never put behind the Cloudflare Tunnel that fronts
+  `vettd`'s `web` service — only `web` gets a public route.
+- **Networking**: `web` and `suite` come from two independently-deployed
+  Compose projects, which by default share neither a network nor DNS. They're
+  bridged by one shared external Docker network, `vettd-dev-net`, created
+  once on the box (`docker network create vettd-dev-net`) and declared
+  `external: true` in both this repo's dev compose file and `vettd`'s
+  `docker-compose.server.yml`. `suite` joins its own project's default
+  network (to reach `vettd-shim`/`cisco-shim` by service name) plus
+  `vettd-dev-net` (so `web` can reach it at `http://suite:8080`); `web` joins
+  its own default (to keep reaching `db`) plus `vettd-dev-net`. `docker
+  compose down` never removes an externally-created network, so redeploying
+  either stack independently doesn't break the other's connectivity.
+
 ## Adding a scanner
 
 1. Implement `SkillScanner` as a factory in `src/adapters/<name>.ts` taking a
