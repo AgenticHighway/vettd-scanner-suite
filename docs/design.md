@@ -191,6 +191,43 @@ folded into `vettd`'s deploy pipeline.
   its own default (to keep reaching `db`) plus `vettd-dev-net`. `docker
   compose down` never removes an externally-created network, so redeploying
   either stack independently doesn't break the other's connectivity.
+- **Compose/workflow**: `compose.dev.yml` (this repo) declares `suite`,
+  `vettd-shim`, `cisco-shim` — no ports published to the host, all three
+  reachable only over `vettd-dev-net`. `.github/workflows/deploy-dev.yml` is
+  push-triggered on `dev`: lint/typecheck/test, build + push images, then an
+  `aws ssm send-command` that base64-ships `compose.dev.yml` and
+  `deploy/scanner-suite.docker.toml` to the box (no git clone on the
+  instance) and runs `docker compose --env-file .env.dev -f compose.dev.yml
+  up -d`. Config is re-pushed on every deploy, so the box never drifts from
+  what's in git. Shape mirrors `vettd`'s own `deploy-dev.yml`, deliberately
+  kept as a separate workflow rather than folded into it (see "Deploy
+  ownership" above).
+- **Images**: this repo's workflow builds and pushes `suite` and
+  `cisco-shim` to their own ECR repos (`vettd-scanner-suite`,
+  `cisco-skill-scanner-shim`), tagged `dev-<sha>` and `dev-latest`.
+  `vettd-shim`'s image (`vettd-skill-scanner-shim`) is published by
+  `vettd-skill-scanner`'s own workflow instead — this repo only references
+  the `dev-latest` tag — matching the "seam to swap for a pinned published
+  image" called out in Local deployment above. None of the three ECR repos
+  are Terraform-managed; they were created directly, same as the EC2 box
+  itself.
+- **IAM**: applied manually (not through `vettd/infra/github-oidc/*.tf`) —
+  extends `vettd`'s existing `vettd-deploy-dev` role (same role, shared
+  across both repos' workflows) with push access to the two new ECR repos,
+  plus the `ssm:SendCommand`/`ec2:Describe*`/`ec2:StartInstances`
+  permissions needed to reach the same `DEV_INSTANCE_ID`. Any IAM
+  resource pattern scoped by name prefix (e.g. `vettd-*`) needs auditing
+  against actual repo names — `cisco-skill-scanner-shim` doesn't match a
+  `vettd-*` prefix and needed its own explicit grant.
+- **Restart policy**: all three services in `compose.dev.yml` set `restart:
+  unless-stopped`, so they self-recover across a host reboot. (`vettd`'s own
+  `docker-compose.yml` sets no restart policy on `web`/`db` today — an
+  existing gap, not something this repo's compose file inherited.)
+- **Sizing**: the shared EC2 box is a `t4g.small` — upgraded from the
+  original `t4g.micro` after both stacks running together (especially under
+  concurrent scans) OOM'd it; `cisco-shim` alone runs ~200 MiB RSS. This
+  dev-box footprint is a data point for future sizing, not a template to
+  copy verbatim for prod (see #5).
 
 ## Adding a scanner
 
