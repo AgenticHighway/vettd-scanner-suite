@@ -1,0 +1,30 @@
+# Config for the remote prod deployment (ECS Fargate, issue #16). Baked into
+# the image at build time via deploy/Dockerfile.prod — Fargate has no host
+# filesystem to bind-mount, unlike the Docker Compose local/dev deployments.
+# See docs/design.md for the general bind-address note (also applies to the
+# shims).
+
+[server]
+host = "0.0.0.0"    # REQUIRED: 0.0.0.0, not the config-default 127.0.0.1 — the
+                    # suite's published port must be reachable from outside
+                    # its own container.
+port = 8080
+
+[jobs]
+max_concurrent = 2
+scanner_timeout_ms = 120000
+
+[scanners.vettd]
+enabled = true
+shim_url = "http://127.0.0.1:8788"    # all three containers share one task's
+                                      # network namespace in prod — loopback,
+                                      # not a compose service name.
+health_timeout_ms = 2000
+scan_timeout_ms = 30000
+
+[scanners.cisco]
+enabled = true
+shim_url = "http://127.0.0.1:8787"    # see note above
+health_timeout_ms = 2000
+scan_timeout_ms = 30000
+queue_depth = 50
