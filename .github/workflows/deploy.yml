@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────
 # Deploy (issue #16) — remote prod deployment of the scanner suite.
 #
-# Builds and pushes the suite + cisco-shim images to ECR (vettd-shim is
+# Builds and pushes the suite + cisco-skill-shim images to ECR (vettd-skill-shim is
 # published by vettd-skill-scanner's own workflow and pinned to a version
 # tag in the task definition, not built here — see docs/design.md), then
 # deploys to the existing `vettd` ECS cluster as its own service/task
@@ -105,7 +105,7 @@ jobs:
                       ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:${{ github.sha }}
                       ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:latest
 
-            - name: Build and push cisco-shim image
+            - name: Build and push cisco-skill-shim image
               uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
               with:
                   context: .
@@ -124,17 +124,18 @@ jobs:
                   SUITE_IMAGE="${REGISTRY}/${{ env.SUITE_ECR_REPO }}:${{ github.sha }}"
                   CISCO_IMAGE="${REGISTRY}/${{ env.CISCO_SHIM_ECR_REPO }}:${{ github.sha }}"
 
-                  # Only suite + cisco-shim images move here. The vettd-shim
-                  # container is left untouched — it stays pinned to whatever
-                  # version tag is already in the task definition (see #5:
-                  # "pinned to an exact version", not moved on every deploy).
+                  # Only suite + cisco-skill-shim images move here. The
+                  # vettd-skill-shim container is left untouched — it stays
+                  # pinned to whatever version tag is already in the task
+                  # definition (see #5: "pinned to an exact version", not
+                  # moved on every deploy).
                   TASK_DEF=$(aws ecs describe-task-definition --task-definition ${{ env.TASK_DEF_FAMILY }} --query 'taskDefinition' --output json)
                   NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
                     --arg SUITE_IMAGE "$SUITE_IMAGE" \
                     --arg CISCO_IMAGE "$CISCO_IMAGE" \
                     '.containerDefinitions = [.containerDefinitions[] |
                        if .name == "suite" then .image = $SUITE_IMAGE
-                       elif .name == "cisco-shim" then .image = $CISCO_IMAGE
+                       elif .name == "cisco-skill-shim" then .image = $CISCO_IMAGE
                        else . end]' | \
                     jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
                   NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
