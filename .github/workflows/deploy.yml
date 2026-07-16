@@ -1,0 +1,167 @@
+# ──────────────────────────────────────────────────────────────────────
+# Deploy (issue #16) — remote prod deployment of the scanner suite.
+#
+# Builds and pushes the suite + cisco-skill-shim images to ECR (vettd-skill-shim is
+# published by vettd-skill-scanner's own workflow and pinned to a version
+# tag in the task definition, not built here — see docs/design.md), then
+# deploys to the existing `vettd` ECS cluster as its own service/task
+# definition (`vettd-scanner-suite`), reachable by vettd web over Service
+# Connect. See the decision on #5 for the full rationale.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Deploy
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "src/**"
+            - "shims/**"
+            - "deploy/**"
+            - "package.json"
+            - "pnpm-lock.yaml"
+            - ".github/workflows/deploy.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: deploy-prod
+    cancel-in-progress: true
+
+permissions:
+    id-token: write
+    contents: read
+
+env:
+    AWS_REGION: us-east-1
+    SUITE_ECR_REPO: vettd-scanner-suite
+    CISCO_SHIM_ECR_REPO: cisco-skill-scanner-shim
+    ECS_CLUSTER: vettd
+    ECS_SERVICE: vettd-scanner-suite
+    TASK_DEF_FAMILY: vettd-scanner-suite
+
+jobs:
+    lint-and-test:
+        name: Lint, typecheck & test
+        runs-on: blacksmith-4vcpu-ubuntu-2204
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install Node
+              uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+
+            - name: Enable Corepack
+              run: corepack enable
+
+            - name: Install dependencies
+              run: pnpm install
+
+            - name: Lint
+              run: pnpm lint
+
+            - name: Typecheck
+              run: pnpm typecheck
+
+            - name: Test
+              run: pnpm test
+
+            - name: Build
+              run: pnpm build
+
+    build-and-deploy:
+        name: Build & Deploy to Prod
+        needs: lint-and-test
+        environment: production
+        runs-on: blacksmith-2vcpu-ubuntu-2404
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Set up Blacksmith Docker builder
+              uses: useblacksmith/setup-docker-builder@3cd79a53752a93f62c273d2edb1403bc7fa6ac6e # v1
+              with:
+                  max-cache-size-mb: "10240"
+
+            - name: Configure AWS credentials (OIDC)
+              uses: aws-actions/configure-aws-credentials@fb7eb401298e393da51cdcb2feb1ed0183619014 # v6
+              with:
+                  role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/vettd-deploy
+                  aws-region: ${{ env.AWS_REGION }}
+
+            - name: Login to Amazon ECR
+              id: ecr-login
+              uses: aws-actions/amazon-ecr-login@c962da2960ed15f492addc26fffa274485265950 # v2
+
+            - name: Build and push suite image
+              uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
+              with:
+                  context: .
+                  file: deploy/Dockerfile.prod
+                  platforms: linux/arm64
+                  push: true
+                  tags: |
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:${{ github.sha }}
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.SUITE_ECR_REPO }}:latest
+
+            - name: Build and push cisco-skill-shim image
+              uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
+              with:
+                  context: .
+                  file: shims/cisco/Dockerfile
+                  platforms: linux/arm64
+                  push: true
+                  tags: |
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.CISCO_SHIM_ECR_REPO }}:${{ github.sha }}
+                      ${{ steps.ecr-login.outputs.registry }}/${{ env.CISCO_SHIM_ECR_REPO }}:latest
+
+            - name: Register ECS task definition with new images
+              id: register-task-definition
+              run: |
+                  set -euo pipefail
+                  REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+                  SUITE_IMAGE="${REGISTRY}/${{ env.SUITE_ECR_REPO }}:${{ github.sha }}"
+                  CISCO_IMAGE="${REGISTRY}/${{ env.CISCO_SHIM_ECR_REPO }}:${{ github.sha }}"
+
+                  # Only suite + cisco-skill-shim images move here. The
+                  # vettd-skill-shim container is left untouched — it stays
+                  # pinned to whatever version tag is already in the task
+                  # definition (see #5: "pinned to an exact version", not
+                  # moved on every deploy).
+                  TASK_DEF=$(aws ecs describe-task-definition --task-definition ${{ env.TASK_DEF_FAMILY }} --query 'taskDefinition' --output json)
+                  NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+                    --arg SUITE_IMAGE "$SUITE_IMAGE" \
+                    --arg CISCO_IMAGE "$CISCO_IMAGE" \
+                    '.containerDefinitions = [.containerDefinitions[] |
+                       if .name == "suite" then .image = $SUITE_IMAGE
+                       elif .name == "cisco-skill-shim" then .image = $CISCO_IMAGE
+                       else . end]' | \
+                    jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+                  NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+                  NEW_ID=$(echo "$NEW_ARN" | awk -F'/' '{print $NF}')
+                  echo "task-def-id=$NEW_ID" >> "$GITHUB_OUTPUT"
+
+            - name: Deploy to ECS
+              run: |
+                  set -euo pipefail
+                  aws ecs update-service \
+                    --cluster ${{ env.ECS_CLUSTER }} \
+                    --service ${{ env.ECS_SERVICE }} \
+                    --task-definition ${{ steps.register-task-definition.outputs.task-def-id }} \
+                    --force-new-deployment
+
+            - name: Wait for deployment
+              run: |
+                  aws ecs wait services-stable \
+                    --cluster ${{ env.ECS_CLUSTER }} \
+                    --services ${{ env.ECS_SERVICE }}
+
+            - name: Print recent ECS service events on failure
+              if: failure()
+              run: |
+                  aws ecs describe-services \
+                    --cluster ${{ env.ECS_CLUSTER }} \
+                    --services ${{ env.ECS_SERVICE }} \
+                    --query 'services[0].events[0:10].[createdAt,message]' \
+                    --output table

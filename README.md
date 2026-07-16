@@ -23,6 +23,7 @@ Architecture details: [docs/design.md](docs/design.md).
 | `.postman/` | Postman smoke-test collection; see `.postman/README.md` |
 | `docs/` | Design docs |
 | `compose.yaml` | Docker Compose local deployment (suite + vettd shim); see `docs/design.md` |
+| `compose.dev.yml` | Remote dev deployment (images from ECR, no host ports); see `docs/design.md` |
 
 ## Quickstart
 

@@ -1,0 +1,27 @@
+# Remote prod deployment (issue #16). Separate from the root Dockerfile
+# because prod bakes its config into the image at build time (Fargate has no
+# host filesystem to bind-mount), while the root Dockerfile is shared by
+# local Compose and remote dev, both of which mount the config at runtime.
+FROM node:24-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.json ./
+COPY src ./src
+RUN pnpm build
+RUN pnpm prune --prod
+
+FROM node:24-slim
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
+COPY deploy/scanner-suite.prod.toml /config/scanner-suite.toml
+EXPOSE 8080
+# Fargate ignores Dockerfile HEALTHCHECK — kept here for local testing
+# consistency only; the real health check is configured on the ECS
+# container definition (task definition, not this file).
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/server/index.js", "/config/scanner-suite.toml"]
