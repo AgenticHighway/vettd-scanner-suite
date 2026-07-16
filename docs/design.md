@@ -245,10 +245,17 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
   authn/z on the suite; see "Out of scope" below). Reachability is via ECS
   Service Connect instead of a shared Docker network: a private DNS
   namespace, `vettd.local` (Cloud Map, VPC-scoped to `vettd-vpc`), that the
-  suite's service publishes into as `scanner-suite.vettd.local:8080`. `vettd`
-  web's own enrollment into this namespace (needed for it to actually call
-  the suite) is separate, deliberately deferred vettd-side work, riding along
-  with an unrelated iteration of vettd web changes rather than tracked here.
+  suite's service publishes into with discovery/DNS name `scanner-suite`.
+  Client tasks resolve it by that **short alias**, `http://scanner-suite:8080`
+  — not `scanner-suite.vettd.local`. Service Connect's client-side resolution
+  isn't a generic Route53 private-hosted-zone lookup; each Service
+  Connect–enrolled client task gets a local proxy that intercepts exactly the
+  configured `dnsName` string and routes it to whatever healthy backend(s)
+  Cloud Map currently reports, so only the short alias resolves, and only
+  from within another Service Connect–enrolled task. `vettd` web's own
+  enrollment into this namespace (needed for it to actually call the suite)
+  is separate, deliberately deferred vettd-side work, riding along with an
+  unrelated iteration of vettd web changes rather than tracked here.
 - **Config**: `deploy/scanner-suite.prod.toml` is baked into the image at
   build time via a dedicated `deploy/Dockerfile.prod` — Fargate has no host
   filesystem to bind-mount from, unlike the EC2 dev box. `deploy/Dockerfile.prod`
