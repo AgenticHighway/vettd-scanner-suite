@@ -5,9 +5,7 @@ that orchestrates first-party scanners (`vettd-skill-scanner`, via its Rust
 HTTP shim) and third-party integrations (Cisco AI Defense, Socket) behind a
 single normalized findings contract.
 
-Private repo; `license` is intentionally `UNLICENSED` while source-available
-vs. open-source is still undecided. Tracking issue:
-[AgenticHighway/vettd#643](https://github.com/AgenticHighway/vettd/issues/643).
+Licensed under [Apache 2.0](LICENSE).
 Architecture details: [docs/design.md](docs/design.md).
 
 ## Repo layout
