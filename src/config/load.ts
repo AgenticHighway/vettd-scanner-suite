@@ -3,6 +3,7 @@ import {readFileSync} from "node:fs";
 import {parse} from "smol-toml";
 
 import {
+	DEFAULT_CISCO_CONCURRENCY,
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
@@ -120,7 +121,11 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(scanners, ["vettd", "cisco", "socket"], "scanners");
 
 	const cisco = optionalTable(scanners, "cisco", "scanners.cisco");
-	checkKeys(cisco, ["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms", "queue_depth"], "scanners.cisco");
+	checkKeys(
+		cisco,
+		["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms", "concurrency", "queue_depth"],
+		"scanners.cisco",
+	);
 	const vettd = optionalTable(scanners, "vettd", "scanners.vettd");
 	checkKeys(vettd, ["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms"], "scanners.vettd");
 	const socket = optionalTable(scanners, "socket", "scanners.socket");
@@ -139,6 +144,7 @@ export function parseConfig(toml: string): SuiteConfig {
 			vettd: readShimScanner(scanners, "vettd", DEFAULT_VETTD_SHIM_URL),
 			cisco: {
 				...readShimScanner(scanners, "cisco", DEFAULT_CISCO_SHIM_URL),
+				concurrency: readPositiveInt(cisco, "concurrency", DEFAULT_CISCO_CONCURRENCY, "scanners.cisco"),
 				queueDepth: readPositiveInt(cisco, "queue_depth", DEFAULT_CISCO_QUEUE_DEPTH, "scanners.cisco"),
 			},
 			socket: {
