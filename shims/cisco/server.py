@@ -9,9 +9,12 @@ process per scan. Python startup (~2.8s) is paid once; each warm scan is ~0.2s.
 GOTCHA: skill_scanner.core.* is an internal (non-public) API. Re-validate
 import paths whenever cisco-ai-skill-scanner is upgraded.
 
-GOTCHA: _scanner is a module-level singleton. Safe only because the TypeScript
-adapter enforces concurrency=1 via an async mutex — only one scan request
-reaches this shim at a time.
+GOTCHA: SkillScanner instances are NOT safe to share across concurrent scans
+(see scanner_pool.py for the specific mutable state). Each request checks one
+out of a ScannerPool for exclusive use; pool size is CISCO_SHIM_CONCURRENCY
+(default 1) and must be >= the suite's [scanners.cisco].concurrency, or scans
+serialize inside this process. SARIFReporter is deliberately still a shared
+singleton — it holds only immutable config.
 
 Run standalone (python3 shims/cisco/server.py); the suite's cisco adapter
 connects to it via [scanners.cisco].shim_url in scanner-suite.toml. Binds to
@@ -26,18 +29,18 @@ import os
 import shutil
 import tempfile
 import traceback
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # One-time initialisation — cost paid at shim startup, not per scan
 # ---------------------------------------------------------------------------
 
-from skill_scanner.core.scanner import SkillScanner  # noqa: E402
 from skill_scanner.core.reporters.sarif_reporter import SARIFReporter  # noqa: E402
 
+from scanner_pool import ScannerPool, warm_up  # noqa: E402
+
 _SCANNER_VERSION: str = importlib.metadata.version("cisco-ai-skill-scanner")
-_scanner = SkillScanner()
 _sarif_reporter = SARIFReporter()
 
 PORT = int(os.environ.get("CISCO_SHIM_PORT", "8787"))
@@ -130,8 +133,9 @@ class ShimHandler(BaseHTTPRequestHandler):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(str(content), encoding="utf-8")
 
-            # Call the Python API directly — no subprocess, warm process
-            result = _scanner.scan_skill(Path(tmp_dir), lenient=True)
+            # Exclusive checkout — see scanner_pool.py for why sharing is unsafe
+            with self.server.pool.acquire() as scanner:
+                result = scanner.scan_skill(Path(tmp_dir), lenient=True)
 
             # Write SARIF to a temp file within the temp dir, then load as dict
             sarif_path = os.path.join(tmp_dir, "output.sarif")
@@ -155,14 +159,47 @@ class ShimHandler(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------------------
+
+
+class ShimServer(ThreadingHTTPServer):
+    """Threaded HTTP server carrying the scanner pool its handlers share."""
+
+    # One thread per request. Daemonised so a scan blocked on acquire() can
+    # never keep the process alive after shutdown.
+    daemon_threads = True
+
+    def __init__(self, address, pool):
+        self.pool = pool
+        super().__init__(address, ShimHandler)
+
+
+def _read_concurrency() -> int:
+    """Pool size from CISCO_SHIM_CONCURRENCY. Fails loudly on a bad value."""
+    raw = os.environ.get("CISCO_SHIM_CONCURRENCY", "1")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit(f"[cisco-shim] CISCO_SHIM_CONCURRENCY must be an integer, got {raw!r}")
+    if value < 1:
+        raise SystemExit(f"[cisco-shim] CISCO_SHIM_CONCURRENCY must be >= 1, got {value}")
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     HOST = os.environ.get("CISCO_SHIM_BIND", "127.0.0.1")
-    server = HTTPServer((HOST, PORT), ShimHandler)
-    log.info("listening on %s:%d (cisco-ai-skill-scanner %s)",
-             HOST, PORT, _SCANNER_VERSION)
+    pool = ScannerPool(_read_concurrency())
+    # Pay the process-wide lazy-init cost before accepting traffic.
+    with pool.acquire() as _warm_scanner:
+        warm_up(_warm_scanner)
+    server = ShimServer((HOST, PORT), pool)
+    log.info("listening on %s:%d (cisco-ai-skill-scanner %s, pool=%d)",
+              HOST, PORT, _SCANNER_VERSION, pool.size)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
