@@ -1,0 +1,3 @@
+# Test-only dependencies for the cisco shim. Never installed into the shim
+# image (shims/cisco/Dockerfile installs requirements.txt only).
+pytest>=8.0,<9.0

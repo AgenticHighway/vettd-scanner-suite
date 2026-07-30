@@ -115,7 +115,8 @@ explicit.
 | `scanners.vettd.shim_url` | `http://127.0.0.1:8788` | Rust http-shim address |
 | `scanners.vettd.health_timeout_ms` / `.scan_timeout_ms` | `2000` / `30000` | Shim call timeouts |
 | `scanners.cisco.*` | as vettd, shim on `8787` | Cisco AI Defense via Python shim |
-| `scanners.cisco.queue_depth` | `50` | Waiters beyond the single in-flight scan before runs skip |
+| `scanners.cisco.concurrency` | `1` | Cisco scans allowed to run at once (≤ the shim's pool size) |
+| `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
 
@@ -125,6 +126,14 @@ Environment-variable carve-outs (deliberately **not** in the TOML):
 - `LOG_LEVEL`, `LOG_PRETTY` — operator log plumbing, not scanner config.
 - `VETTD_SHIM_PORT`, `CISCO_SHIM_PORT` — belong to the shim *processes*; the
   suite only knows the URLs its adapters dial.
+- `CISCO_SHIM_CONCURRENCY` — the cisco shim's scanner-pool size (default 1).
+  Belongs to the shim *process*, like `CISCO_SHIM_PORT`: the shim hands each
+  request an exclusively checked-out `SkillScanner` because instances carry
+  per-scan mutable state (see `shims/cisco/scanner_pool.py`). Keep it at or
+  above `[scanners.cisco].concurrency` — a lower value is safe but serializes
+  scans inside the shim. In prod it is set on the `cisco-skill-shim` container
+  in the ECS task definition, which `deploy.yml` never rewrites (it patches
+  images only), so the value survives deploys and must be changed by hand.
 
 ## Local deployment (Docker Compose)
 

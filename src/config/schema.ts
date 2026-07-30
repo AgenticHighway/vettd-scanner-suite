@@ -9,6 +9,7 @@ export const DEFAULT_MAX_CONCURRENT_JOBS = 2;
 export const DEFAULT_SCANNER_TIMEOUT_MS = 120_000;
 export const DEFAULT_VETTD_SHIM_URL = "http://127.0.0.1:8788";
 export const DEFAULT_CISCO_SHIM_URL = "http://127.0.0.1:8787";
+export const DEFAULT_CISCO_CONCURRENCY = 1;
 export const DEFAULT_HEALTH_TIMEOUT_MS = 2_000;
 export const DEFAULT_SCAN_TIMEOUT_MS = 30_000;
 export const DEFAULT_CISCO_QUEUE_DEPTH = 50;
@@ -33,7 +34,13 @@ export interface ShimScannerConfig {
 }
 
 export interface CiscoScannerConfig extends ShimScannerConfig {
-	/** Waiters allowed beyond the single in-flight scan before runs are skipped. */
+	/**
+	 * Cisco scans allowed to run at once. Must not exceed the shim's own pool
+	 * size (CISCO_SHIM_CONCURRENCY on the shim process) — a larger value here
+	 * just queues inside the shim instead, which is safe but pointless.
+	 */
+	concurrency: number;
+	/** Waiters allowed beyond the in-flight scans before runs are skipped. */
 	queueDepth: number;
 }
 

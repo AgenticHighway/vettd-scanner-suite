@@ -27,4 +27,10 @@ enabled = true
 shim_url = "http://127.0.0.1:8787"    # see note above
 health_timeout_ms = 2000
 scan_timeout_ms = 30000
+# 2, not the default 1 (vettd-scanner-suite#23). Sized against measured ECS
+# utilization: serial bursts already peak near 44% of this task's 512 CPU
+# units, so ~2 parallel scans is the ceiling before Fargate CPU throttling.
+# Requires CISCO_SHIM_CONCURRENCY=2 on the cisco-skill-shim container to have
+# any effect — that lives in the task definition, not this file.
+concurrency = 2
 queue_depth = 50

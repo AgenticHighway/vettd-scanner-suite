@@ -7,11 +7,12 @@ import {sarifToFindings} from "./sarif-adapter.js";
 const CISCO_SOURCE_ID = "cisco";
 
 // ─── Queue ───────────────────────────────────────────────────────────────────
-// GOTCHA (inherited from vettd web's constrained ECS deployment): the cisco
-// Python shim adds memory pressure. Concurrency is limited to 1 to avoid OOM
-// under burst uploads. Raise [scanners.cisco].queue_depth if queue pressure
-// becomes observable via status="skipped" runs.
-const CISCO_CONCURRENCY = 1;
+// Concurrency comes from [scanners.cisco].concurrency (default 1). It must not
+// exceed the shim process's own pool size (CISCO_SHIM_CONCURRENCY): the shim
+// hands each scan an exclusively-checked-out scanner instance, so a higher
+// value here simply blocks inside the shim rather than running in parallel.
+// Raise [scanners.cisco].queue_depth if queue pressure becomes observable via
+// status="skipped" runs.
 
 class QueueFullError extends Error {
 	readonly code = "cisco_queue_full" as const;
@@ -146,7 +147,7 @@ export function createCiscoScanner(cfg: CiscoScannerConfig): SkillScanner {
 	const waiters: Array<{resolve: () => void}> = [];
 
 	function acquire(): Promise<void> {
-		if (inFlight < CISCO_CONCURRENCY) {
+		if (inFlight < cfg.concurrency) {
 			inFlight++; // synchronous increment — atomic in single-threaded JS
 			return Promise.resolve();
 		}
@@ -161,7 +162,8 @@ export function createCiscoScanner(cfg: CiscoScannerConfig): SkillScanner {
 	function release(): void {
 		const next = waiters.shift();
 		if (next) {
-			// Transfer slot directly — do not decrement so inFlight stays at CISCO_CONCURRENCY.
+			// Transfer slot directly — do not decrement so inFlight stays at
+			// the configured concurrency ceiling.
 			next.resolve();
 			return;
 		}

@@ -28,4 +28,9 @@ enabled = true
 shim_url = "http://cisco-shim:8787"    # compose service name, not localhost
 health_timeout_ms = 2000
 scan_timeout_ms = 30000
+# Left at the default 1 for local/dev on purpose: the shared dev box is a
+# t4g.small that has already OOM'd with both stacks running under concurrent
+# scans (see docs/design.md "Remote dev deployment" sizing note), and
+# cisco-shim alone runs ~200 MiB RSS.
+concurrency = 1
 queue_depth = 50
