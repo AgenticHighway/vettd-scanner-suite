@@ -142,12 +142,15 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-# IDE
+# IDE & Agents
 .vscode/
 .DS_Store
 .idea/
 *.swp
 *.swo
+.opencode/
+.claude/
+.superpowers/
 
 # Local files
 .local/
