@@ -9,7 +9,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY shims/cisco/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY shims/cisco/server.py ./
+COPY shims/cisco/server.py shims/cisco/scanner_pool.py ./
 EXPOSE 8787
 # No HEALTHCHECK — matches the vettd-shim precedent; the suite adapter's
 # available() check covers readiness (an unreachable shim degrades that

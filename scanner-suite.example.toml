@@ -28,7 +28,10 @@ enabled = false
 shim_url = "http://127.0.0.1:8787"
 health_timeout_ms = 2000
 scan_timeout_ms = 30000
-# Waiters allowed beyond the single in-flight scan before runs are skipped.
+# Cisco scans allowed to run at once. Must be <= the shim process's pool size
+# (CISCO_SHIM_CONCURRENCY); a larger value here just queues inside the shim.
+concurrency = 1
+# Waiters allowed beyond the in-flight scans before runs are skipped.
 queue_depth = 50
 
 [scanners.socket]

@@ -22,6 +22,7 @@ enabled = true
 shim_url = "http://127.0.0.1:9787"
 health_timeout_ms = 1500
 scan_timeout_ms = 25000
+concurrency = 3
 queue_depth = 10
 
 [scanners.socket]
@@ -42,6 +43,7 @@ describe("parseConfig", () => {
 					shimUrl: "http://127.0.0.1:9787",
 					healthTimeoutMs: 1500,
 					scanTimeoutMs: 25000,
+					concurrency: 3,
 					queueDepth: 10,
 				},
 				socket: {enabled: true, timeoutMs: 15000},
@@ -55,6 +57,7 @@ describe("parseConfig", () => {
 		expect(config.jobs).toEqual({maxConcurrent: 2, scannerTimeoutMs: 120000});
 		expect(config.scanners.vettd.shimUrl).toBe("http://127.0.0.1:8788");
 		expect(config.scanners.cisco.shimUrl).toBe("http://127.0.0.1:8787");
+		expect(config.scanners.cisco.concurrency).toBe(1);
 		expect(config.scanners.cisco.queueDepth).toBe(50);
 		expect(config.scanners.socket.timeoutMs).toBe(30000);
 	});
@@ -85,6 +88,12 @@ describe("parseConfig", () => {
 	it("rejects non-positive numeric values", () => {
 		expect(() => parseConfig("[server]\nport = 0\n")).toThrow(ConfigError);
 		expect(() => parseConfig("[scanners.vettd]\nscan_timeout_ms = -5\n")).toThrow(ConfigError);
+	});
+
+	// Concurrency below 1 would deadlock the adapter's mutex — it must never
+	// parse, rather than being clamped silently at load time.
+	it("rejects a non-positive cisco concurrency", () => {
+		expect(() => parseConfig("[scanners.cisco]\nconcurrency = 0\n")).toThrow(ConfigError);
 	});
 
 	it("rejects non-integer numeric values", () => {

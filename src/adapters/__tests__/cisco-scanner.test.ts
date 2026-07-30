@@ -65,6 +65,7 @@ function makeScanner(overrides: Partial<CiscoScannerConfig> = {}) {
 		shimUrl: "http://127.0.0.1:8787",
 		healthTimeoutMs: 2000,
 		scanTimeoutMs: 30000,
+		concurrency: 1,
 		queueDepth: 50,
 		...overrides,
 	});
@@ -247,5 +248,73 @@ describe("ciscoScanner queue", () => {
 		releaseFirst();
 		await first;
 		await second;
+	});
+});
+
+// ─── concurrency ─────────────────────────────────────────────────────────────
+// These two tests are the point of the config knob: the same adapter must
+// serialize at 1 and genuinely overlap at 2. Both use a gate the mock only
+// releases once the assertion has been made, so a wrong limit hangs (and the
+// test times out) rather than passing by accident.
+
+describe("ciscoScanner concurrency", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	function gatedFetch() {
+		let releaseAll!: () => void;
+		const gate = new Promise<void>((r) => {
+			releaseAll = r;
+		});
+		let started = 0;
+		const reached: Array<(n: number) => void> = [];
+		mockFetch.mockImplementation(() => {
+			started++;
+			for (const notify of reached) notify(started);
+			return gate.then(() => ({
+				ok: true,
+				json: async () => ({ok: true, sarif: makeMinimalSarif(), version: "2.0.11"}),
+			})) as unknown as Promise<Response>;
+		});
+		function whenStarted(count: number): Promise<void> {
+			return new Promise<void>((resolve) => {
+				if (started >= count) return resolve();
+				reached.push((n) => {
+					if (n >= count) resolve();
+				});
+			});
+		}
+		return {releaseAll, whenStarted, startedCount: () => started};
+	}
+
+	it("concurrency=2 lets two scans reach the shim at the same time", async () => {
+		const {releaseAll, whenStarted} = gatedFetch();
+		const scanner = makeScanner({concurrency: 2});
+
+		const first = scanner.scan(makeInput({"SKILL.md": "s1"}));
+		const second = scanner.scan(makeInput({"SKILL.md": "s2"}));
+
+		// Resolves only if BOTH reached the shim without either completing.
+		await whenStarted(2);
+
+		releaseAll();
+		await Promise.all([first, second]);
+	});
+
+	it("concurrency=1 serializes: the second scan waits for the first", async () => {
+		const {releaseAll, whenStarted, startedCount} = gatedFetch();
+		const scanner = makeScanner({concurrency: 1});
+
+		const first = scanner.scan(makeInput({"SKILL.md": "s1"}));
+		const second = scanner.scan(makeInput({"SKILL.md": "s2"}));
+
+		await whenStarted(1);
+		// Flush pending microtasks — if the mutex were broken, the second scan
+		// would have dispatched by now.
+		await new Promise((r) => setTimeout(r, 10));
+		expect(startedCount()).toBe(1);
+
+		releaseAll();
+		await Promise.all([first, second]);
+		expect(startedCount()).toBe(2);
 	});
 });

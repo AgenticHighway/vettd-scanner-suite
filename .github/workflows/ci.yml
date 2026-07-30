@@ -6,8 +6,9 @@
 #   secrets scanning.
 #
 # JOBS (run in parallel):
-#   check    — lint → typecheck → test → build
-#   secrets  — gitleaks (always runs — any file can contain secrets)
+#   check      — lint → typecheck → test → build
+#   shim-tests — pytest for shims/cisco (Python; not covered by pnpm test)
+#   secrets    — gitleaks (always runs — any file can contain secrets)
 #
 # NOTE: no pnpm-lock.yaml is committed yet (see repo setup notes) — this
 # job uses a plain `pnpm install`. Switch to `--frozen-lockfile` once a
@@ -62,6 +63,25 @@ jobs:
 
             - name: Build
               run: pnpm build
+
+    shim-tests:
+        name: Cisco shim tests (pytest)
+        runs-on: blacksmith-2vcpu-ubuntu-2204
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install Python
+              uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+              with:
+                  python-version: '3.12' # matches shims/cisco/Dockerfile's base image
+                  cache: 'pip'
+
+            - name: Install shim dependencies
+              run: pip install -r shims/cisco/requirements.txt -r shims/cisco/requirements-dev.txt
+
+            - name: Run shim tests
+              working-directory: shims/cisco
+              run: pytest -v
 
     secrets:
         name: Secrets scan

@@ -115,7 +115,8 @@ explicit.
 | `scanners.vettd.shim_url` | `http://127.0.0.1:8788` | Rust http-shim address |
 | `scanners.vettd.health_timeout_ms` / `.scan_timeout_ms` | `2000` / `30000` | Shim call timeouts |
 | `scanners.cisco.*` | as vettd, shim on `8787` | Cisco AI Defense via Python shim |
-| `scanners.cisco.queue_depth` | `50` | Waiters beyond the single in-flight scan before runs skip |
+| `scanners.cisco.concurrency` | `1` | Cisco scans allowed to run at once (≤ the shim's pool size) |
+| `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
 
@@ -125,6 +126,14 @@ Environment-variable carve-outs (deliberately **not** in the TOML):
 - `LOG_LEVEL`, `LOG_PRETTY` — operator log plumbing, not scanner config.
 - `VETTD_SHIM_PORT`, `CISCO_SHIM_PORT` — belong to the shim *processes*; the
   suite only knows the URLs its adapters dial.
+- `CISCO_SHIM_CONCURRENCY` — the cisco shim's scanner-pool size (default 1).
+  Belongs to the shim *process*, like `CISCO_SHIM_PORT`: the shim hands each
+  request an exclusively checked-out `SkillScanner` because instances carry
+  per-scan mutable state (see `shims/cisco/scanner_pool.py`). Keep it at or
+  above `[scanners.cisco].concurrency` — a lower value is safe but serializes
+  scans inside the shim. In prod it is set on the `cisco-skill-shim` container
+  in the ECS task definition, which `deploy.yml` never rewrites (it patches
+  images only), so the value survives deploys and must be changed by hand.
 
 ## Local deployment (Docker Compose)
 
@@ -228,6 +237,87 @@ folded into `vettd`'s deploy pipeline.
   concurrent scans) OOM'd it; `cisco-shim` alone runs ~200 MiB RSS. This
   dev-box footprint is a data point for future sizing, not a template to
   copy verbatim for prod (see #5).
+
+## Remote prod deployment
+
+Decision recorded on [#5](https://github.com/AgenticHighway/vettd-scanner-suite/issues/5); implementation tracked by [#16](https://github.com/AgenticHighway/vettd-scanner-suite/issues/16).
+
+The suite (and its shims) run as their own ECS Fargate service
+(`vettd-scanner-suite`) in the existing `vettd` cluster — a separate service
+from `vettd`'s own `web` service, not folded into it. Unlike dev's
+independent-containers-over-a-shared-Docker-network shape, all three
+components run as containers inside **one task**, sharing its network
+namespace — the suite reaches its shims over `127.0.0.1`, the same addressing
+a bare-metal run uses (see "Local deployment" above for the contrast).
+
+- **Exposure**: internal-only, no public route — same rationale as dev (no
+  authn/z on the suite; see "Out of scope" below). Reachability is via ECS
+  Service Connect instead of a shared Docker network: a private DNS
+  namespace, `vettd.local` (Cloud Map, VPC-scoped to `vettd-vpc`), that the
+  suite's service publishes into with discovery/DNS name `scanner-suite`.
+  Client tasks resolve it by that **short alias**, `http://scanner-suite:8080`
+  — not `scanner-suite.vettd.local`. Service Connect's client-side resolution
+  isn't a generic Route53 private-hosted-zone lookup; each Service
+  Connect–enrolled client task gets a local proxy that intercepts exactly the
+  configured `dnsName` string and routes it to whatever healthy backend(s)
+  Cloud Map currently reports, so only the short alias resolves, and only
+  from within another Service Connect–enrolled task. `vettd` web's own
+  enrollment into this namespace (needed for it to actually call the suite)
+  is separate, deliberately deferred vettd-side work, riding along with an
+  unrelated iteration of vettd web changes rather than tracked here.
+- **Config**: `deploy/scanner-suite.prod.toml` is baked into the image at
+  build time via a dedicated `deploy/Dockerfile.prod` — Fargate has no host
+  filesystem to bind-mount from, unlike the EC2 dev box. `deploy/Dockerfile.prod`
+  is separate from the root `Dockerfile`, which stays runtime-mount-based for
+  local/dev. Shim URLs in the prod config point at `127.0.0.1`, not compose
+  service names.
+- **Task definition**: family `vettd-scanner-suite`, `0.5 vCPU / 2 GB`,
+  `arm64`, no task role (the suite makes no AWS API calls and carries no
+  secrets). Three containers — `suite` (port 8080; the only one with a
+  Service Connect port mapping, since `vettd-skill-shim`/`cisco-skill-shim`
+  are only ever reached over loopback, never published). Execution role
+  reuses `vettd`'s existing `vettd-ecs-execution-role`.
+- **Deploy workflow**: `.github/workflows/deploy.yml`, push-triggered on
+  `main`: lint/typecheck/test, build + push `suite` and `cisco-skill-shim`
+  images (tagged `<sha>` + `latest`), register a new task-def revision
+  patching only those two containers' images, `aws ecs update-service
+  --force-new-deployment`, wait for stable. Deliberately omits the
+  Terraform-validate/migrations/schema-drift jobs `vettd`'s own `deploy.yml`
+  has — neither applies here (no Terraform, no database).
+- **Images/versioning**: `suite`/`cisco-skill-shim` move continuously with
+  every merge to `main` (sha + latest), same pattern as dev. `vettd-skill-shim`
+  is different — pinned to an exact version tag published by
+  `vettd-skill-scanner`'s own tag-triggered workflow (see
+  [vettd-skill-scanner#2](https://github.com/AgenticHighway/vettd-skill-scanner/issues/2)),
+  and this repo's deploy workflow never touches that container's image.
+  Bumping the pinned version means registering a new task-def revision by
+  hand — there's no auto-follow, by design (see #5).
+- **IAM**: `vettd-deploy` (the same OIDC role `vettd`'s own prod deploy uses)
+  needed two additions that weren't already there: an explicit ECR push
+  grant for `cisco-skill-scanner-shim` (its inline policy was scoped to a
+  `vettd-*` resource prefix, the same gap hit on the dev role during #15),
+  and a new OIDC trust-policy `sub` entry
+  (`repo:AgenticHighway/vettd-scanner-suite:environment:production`) — the
+  role's trust policy was originally scoped only to `vettd` and
+  `vettd-skill-scanner`'s claims.
+- **Logging**: container logs go to `/aws/ecs/vettd-scanner-suite`, created
+  manually — `vettd-ecs-execution-role`'s managed execution policy doesn't
+  include `logs:CreateLogGroup`. Service Connect's own proxy log config needs
+  the same treatment: point it at that same existing group with auto-create
+  disabled, rather than letting the console default it to its own
+  `/ecs/vettd-scanner-suite` group (which would need its own
+  `CreateLogGroup` grant to work).
+- **Networking gotcha**: the ECS console's subnet picker defaulted to all
+  four subnets in `vettd-vpc`, not just the two intended public ones — the
+  extra two are private (no IGW route), and Fargate round-robins task
+  placement across whatever's configured, so tasks landing there couldn't
+  reach ECR at all. The service's subnet list needs to be checked explicitly
+  against intent, not assumed from a console default.
+- **Security group**: dedicated `vettd-scanner-suite-sg`, inbound TCP 8080
+  from `web`'s own security group only (an SG-to-SG reference, not a CIDR) —
+  nothing else in the VPC can reach the suite.
+- **Cost**: ~$30–35/mo (arm64, 0.5 vCPU/2GB Fargate on-demand), within the
+  budget cap alongside existing spend.
 
 ## Adding a scanner
 

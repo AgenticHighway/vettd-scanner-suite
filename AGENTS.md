@@ -127,6 +127,12 @@ pnpm test
 pnpm build
 ```
 
+Python shim (`shims/cisco`) — not covered by `pnpm test`:
+
+```bash
+cd shims/cisco && pytest
+```
+
 ## Notes for agents
 
 - This suite's job is to normalize findings across scanners of varying
