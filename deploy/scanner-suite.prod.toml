@@ -13,6 +13,7 @@ port = 8080
 [jobs]
 max_concurrent = 2
 scanner_timeout_ms = 120000
+max_batch_items = 50
 
 [scanners.vettd]
 enabled = true
