@@ -4,8 +4,10 @@ Collection: `collection.json`. Environment: `environment.json` (`baseUrl`,
 default `http://127.0.0.1:8080`).
 
 Covers `GET /health`, the `POST /scans` (JSON body) -> `GET /scans/:id` happy
-path, and the `400`/`404`/`415` error paths. The two seeded skill fixtures
-are inline JSON payloads in the collection — no files on disk to attach.
+path, the `POST /scans/batch` -> `GET /scans/batch/:id` batch happy path
+(including a partially-rejected batch), and the `400`/`404`/`415` error
+paths for both. The seeded skill fixtures are inline JSON payloads in the
+collection — no files on disk to attach.
 
 ## Prerequisites
 
