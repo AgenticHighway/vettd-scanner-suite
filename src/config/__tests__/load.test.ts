@@ -10,6 +10,7 @@ port = 9090
 [jobs]
 max_concurrent = 4
 scanner_timeout_ms = 60000
+max_batch_items = 10
 
 [scanners.vettd]
 enabled = true
@@ -35,7 +36,7 @@ describe("parseConfig", () => {
 		const config = parseConfig(FULL_CONFIG);
 		expect(config).toEqual({
 			server: {host: "0.0.0.0", port: 9090},
-			jobs: {maxConcurrent: 4, scannerTimeoutMs: 60000},
+			jobs: {maxConcurrent: 4, scannerTimeoutMs: 60000, maxBatchItems: 10},
 			scanners: {
 				vettd: {enabled: true, shimUrl: "http://127.0.0.1:9788", healthTimeoutMs: 1000, scanTimeoutMs: 20000},
 				cisco: {
@@ -54,7 +55,7 @@ describe("parseConfig", () => {
 	it("applies defaults for an empty config", () => {
 		const config = parseConfig("");
 		expect(config.server).toEqual({host: "127.0.0.1", port: 8080});
-		expect(config.jobs).toEqual({maxConcurrent: 2, scannerTimeoutMs: 120000});
+		expect(config.jobs).toEqual({maxConcurrent: 2, scannerTimeoutMs: 120000, maxBatchItems: 50});
 		expect(config.scanners.vettd.shimUrl).toBe("http://127.0.0.1:8788");
 		expect(config.scanners.cisco.shimUrl).toBe("http://127.0.0.1:8787");
 		expect(config.scanners.cisco.concurrency).toBe(1);
@@ -94,6 +95,10 @@ describe("parseConfig", () => {
 	// parse, rather than being clamped silently at load time.
 	it("rejects a non-positive cisco concurrency", () => {
 		expect(() => parseConfig("[scanners.cisco]\nconcurrency = 0\n")).toThrow(ConfigError);
+	});
+
+	it("rejects a non-positive max_batch_items", () => {
+		expect(() => parseConfig("[jobs]\nmax_batch_items = 0\n")).toThrow(ConfigError);
 	});
 
 	it("rejects non-integer numeric values", () => {

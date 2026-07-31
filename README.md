@@ -41,6 +41,12 @@ curl -sS -X POST -H 'content-type: application/json' \
   -d '{"textFiles":{"SKILL.md":"# Skill"},"allPaths":["SKILL.md"]}' \
   http://127.0.0.1:8080/scans
 curl -sS http://127.0.0.1:8080/scans/<jobId>
+
+# submit a batch of scans and poll it (see docs/design.md "Batch intake"):
+curl -sS -X POST -H 'content-type: application/json' \
+  -d '{"items":[{"textFiles":{"SKILL.md":"# Skill"},"allPaths":["SKILL.md"]}]}' \
+  http://127.0.0.1:8080/scans/batch
+curl -sS http://127.0.0.1:8080/scans/batch/<batchId>
 ```
 
 Scanners are disabled unless enabled in the TOML. `SOCKET_API_KEY` comes from

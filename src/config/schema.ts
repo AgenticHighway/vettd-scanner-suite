@@ -6,6 +6,7 @@
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PORT = 8080;
 export const DEFAULT_MAX_CONCURRENT_JOBS = 2;
+export const DEFAULT_MAX_BATCH_ITEMS = 50;
 export const DEFAULT_SCANNER_TIMEOUT_MS = 120_000;
 export const DEFAULT_VETTD_SHIM_URL = "http://127.0.0.1:8788";
 export const DEFAULT_CISCO_SHIM_URL = "http://127.0.0.1:8787";
@@ -23,6 +24,8 @@ export interface ServerConfig {
 export interface JobsConfig {
 	maxConcurrent: number;
 	scannerTimeoutMs: number;
+	/** Items allowed in one POST /scans/batch submission. */
+	maxBatchItems: number;
 }
 
 /** Scanner reached through a local HTTP shim (vettd's Rust shim, cisco's Python shim). */

@@ -13,6 +13,11 @@ port = 8080
 max_concurrent = 2
 # Per-scanner hard timeout within a job.
 scanner_timeout_ms = 120000
+# Items allowed in one POST /scans/batch submission. A caller's poll deadline
+# must account for worst-case drain time: ceil(items / max_concurrent) x
+# per-job duration — a full batch at the defaults above can take minutes, not
+# seconds, to finish.
+max_batch_items = 50
 
 [scanners.vettd]
 # First-party skill scanner, reached via its Rust HTTP shim (the http-shim

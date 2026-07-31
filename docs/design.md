@@ -10,9 +10,9 @@ The suite is a standalone Fastify HTTP service that orchestrates scanners and
 normalizes their output to one findings contract:
 
 ```
-client ── POST /scans (JSON) ──▶ validate (size/file-count) ──▶ job store/executor
-                                                                    │
-                    ┌── runner fan-out (per-scanner timeout) ◀──────┘
+client ── POST /scans (JSON) ──────────────────────▶ validate (size/file-count) ──▶ job store/executor
+       └─ POST /scans/batch (N targets) ─▶ batch index ─┘                              │
+                    ┌── runner fan-out (per-scanner timeout) ◀───────────────────────────┘
                     │
       ┌─────────────┼──────────────────┐
       ▼             ▼                  ▼
@@ -87,6 +87,57 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
   `src/server/app.ts` is the designated replacement point for a push
   mechanism (SQS/webhook) once the job store goes durable.
 
+### Batch intake
+
+`POST /scans/batch` submits an array of scan items (`{items: [{textFiles,
+allPaths}, ...]}`) and creates one ordinary job per item — **a batch creates
+ordinary jobs that drain through the same `[jobs].max_concurrent`; it is a
+correlation record, not a scheduling unit.** This does not raise the suite's
+throughput ceiling (that was `[scanners.cisco].concurrency`, raised in #23) —
+it reduces round trips and open connections for a caller submitting many
+targets at once, which matters for a caller running on a constrained task
+(e.g. `vettd` `web`'s 0.25 vCPU Fargate service).
+
+- **Per-item accept/reject.** A malformed item or a full job store rejects
+  only that item — `{index, error}` in `rejected` — while sibling items queue
+  normally. Whole-batch structural errors (bad envelope, empty/oversized
+  `items`) still `400` the entire request. **A caller that ignores
+  `rejected` silently loses scans** — every index in `[0, n)` appears exactly
+  once across `accepted` and `rejected`, so a complete caller must account
+  for both arrays.
+- **Status-only poll.** `GET /scans/batch/:id` never inlines `results` —
+  Cisco's `rawReport` can be multi-MB and this route is meant to be polled on
+  an interval. Fetch full results per item from the existing
+  `GET /scans/:id`.
+- **The batch index (`src/core/jobs/batch-index.ts`) is separate from
+  `JobStore`, deliberately.** `JobStore` is the seam for a future durable
+  store; a batch is HTTP-layer bookkeeping with the opposite durability
+  requirement — losing a job costs a scan, losing a batch entry costs a
+  lookup table the caller already holds a copy of. In-memory, 1 h TTL from
+  `submittedAt`, capped at 1000 batches (`429` past the cap, mirroring
+  `JobStoreFullError`). A job swept by the store's own TTL while its batch
+  entry is still live renders as `status: "expired"`, not `"queued"` — the
+  same "unrecoverable, resubmit" meaning `GET /scans/:id`'s `404` already
+  carries.
+- **Sizing a poll deadline.** Items enter the executor in submission order,
+  but a batch has no reserved concurrency lane — worst-case drain time is
+  `ceil(items / max_concurrent) × per-job duration`. At the defaults (50
+  items, `max_concurrent = 2`) that's 25 sequential rounds — several minutes
+  at typical per-job duration, far past a poll deadline sized for one scan.
+  Callers must size their batch poll deadline from the batch, not from a
+  single scan.
+- **413 is the one place the per-item promise doesn't hold.** `bodyLimit`
+  (20 MB) rejects an oversized request before parsing runs, so an oversized
+  batch gets no per-item tolerance and no `{error}` body — just fastify's
+  default 413 shape.
+- **Batches retained in memory shrink, not grow, versus N single
+  submissions.** A queued job holds its `ScannerInput` in RAM until it runs;
+  N separate `POST /scans` calls can together retain up to N × 20 MB, while
+  one N-item batch is capped at 20 MB total by `bodyLimit`.
+- **Naming note:** `vettd`'s own `POST /api/scans/batch` (built against this
+  endpoint) is a different, DB-backed entity in a different service, with its
+  own `batchId`. Do not conflate the two `batchId`s across the wire boundary.
+
 ### HTTP API
 
 | Route | Success | Errors |
@@ -94,9 +145,13 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
 | `GET /health` | `200 {ok: true}` | — |
 | `POST /scans` (JSON body) | `202 {jobId, status}` | `400` malformed body, missing fields, oversized (file count / per-file bytes / total bytes), `413` over bodyLimit, `415` unregistered content type, `429` store full |
 | `GET /scans/:id` | `200` job envelope | `404` unknown/evicted id |
+| `POST /scans/batch` (JSON body `{items: [...]}`) | `202 {batchId, submittedAt, accepted, rejected}` | `400` malformed envelope / empty / over `max_batch_items`, `413` over bodyLimit, `415` unregistered content type, `429` batch index full |
+| `GET /scans/batch/:id` | `200` same shape as the `202` above, `status` per item | `404` unknown/evicted batch id |
 
 App-level errors respond `{error: string}`; fastify-generated errors (413,
 415, 500) keep fastify's default `{statusCode, error, message}` shape.
+Per-item validation failures and a full job store are **not** batch-level
+errors — they appear as `{index, error}` in `rejected` on a `202`.
 
 ## Configuration
 
@@ -111,6 +166,7 @@ explicit.
 | `server.host` / `server.port` | `127.0.0.1` / `8080` | Listen address |
 | `jobs.max_concurrent` | `2` | Scan jobs running simultaneously |
 | `jobs.scanner_timeout_ms` | `120000` | Per-scanner hard timeout |
+| `jobs.max_batch_items` | `50` | Items allowed in one `POST /scans/batch` submission |
 | `scanners.vettd.enabled` | `false` | First-party Rust scanner |
 | `scanners.vettd.shim_url` | `http://127.0.0.1:8788` | Rust http-shim address |
 | `scanners.vettd.health_timeout_ms` / `.scan_timeout_ms` | `2000` / `30000` | Shim call timeouts |
@@ -359,3 +415,8 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
 - **AuthN/Z** — the service binds `127.0.0.1` by default; exposure decisions
   come with the cloud deployment (which also needs an ECS sizing/cost check
   against the budget cap).
+- **Batch cancellation, batch priority/fairness against single submissions,
+  results inlined in the batch poll** — batch intake (#21) is intake-only;
+  a batch's items share the same executor FIFO as single `POST /scans`
+  submissions with no special treatment either way, and results stay behind
+  `GET /scans/:id` (see "Batch intake" above).

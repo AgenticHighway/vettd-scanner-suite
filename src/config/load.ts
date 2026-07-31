@@ -7,6 +7,7 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
+	DEFAULT_MAX_BATCH_ITEMS,
 	DEFAULT_MAX_CONCURRENT_JOBS,
 	DEFAULT_SCANNER_TIMEOUT_MS,
 	DEFAULT_SCAN_TIMEOUT_MS,
@@ -115,7 +116,7 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(server, ["host", "port"], "server");
 
 	const jobs = optionalTable(root, "jobs", "jobs");
-	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms"], "jobs");
+	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items"], "jobs");
 
 	const scanners = optionalTable(root, "scanners", "scanners");
 	checkKeys(scanners, ["vettd", "cisco", "socket"], "scanners");
@@ -139,6 +140,7 @@ export function parseConfig(toml: string): SuiteConfig {
 		jobs: {
 			maxConcurrent: readPositiveInt(jobs, "max_concurrent", DEFAULT_MAX_CONCURRENT_JOBS, "jobs"),
 			scannerTimeoutMs: readPositiveInt(jobs, "scanner_timeout_ms", DEFAULT_SCANNER_TIMEOUT_MS, "jobs"),
+			maxBatchItems: readPositiveInt(jobs, "max_batch_items", DEFAULT_MAX_BATCH_ITEMS, "jobs"),
 		},
 		scanners: {
 			vettd: readShimScanner(scanners, "vettd", DEFAULT_VETTD_SHIM_URL),
