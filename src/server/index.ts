@@ -3,6 +3,7 @@
 
 import {ConfigError, loadConfig} from "../config/load.js";
 import {DEFAULT_CONFIG_PATH} from "../consts.js";
+import {BatchIndex} from "../core/jobs/batch-index.js";
 import {JobExecutor} from "../core/jobs/executor.js";
 import {InMemoryJobStore} from "../core/jobs/store.js";
 import {buildScanners} from "../core/registry.js";
@@ -29,13 +30,14 @@ logger.info(
 );
 
 const store = new InMemoryJobStore();
+const batches = new BatchIndex();
 const executor = new JobExecutor({
 	store,
 	scanners,
 	scannerTimeoutMs: config.jobs.scannerTimeoutMs,
 	maxConcurrent: config.jobs.maxConcurrent,
 });
-const app = buildApp({store, executor});
+const app = buildApp({store, executor, batches, maxBatchItems: config.jobs.maxBatchItems});
 
 await app.listen({host: config.server.host, port: config.server.port});
 

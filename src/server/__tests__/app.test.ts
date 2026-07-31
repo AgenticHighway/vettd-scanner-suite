@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 
 import type {ScannerOutput, SkillScanner} from "../../contract/scanner.js";
+import {BatchIndex} from "../../core/jobs/batch-index.js";
 import {JobExecutor} from "../../core/jobs/executor.js";
 import {InMemoryJobStore} from "../../core/jobs/store.js";
 import {buildApp} from "../app.js";
@@ -25,11 +26,13 @@ const fakeScanner: SkillScanner = {
 	scan: async () => fakeOutput("fake"),
 };
 
-function makeApp(scanners: SkillScanner[] = [fakeScanner]) {
+function makeApp(opts: {scanners?: SkillScanner[]; maxConcurrent?: number; maxBatchItems?: number} = {}) {
+	const {scanners = [fakeScanner], maxConcurrent = 2, maxBatchItems = 50} = opts;
 	const store = new InMemoryJobStore();
-	const executor = new JobExecutor({store, scanners, scannerTimeoutMs: 5000, maxConcurrent: 2});
-	const app = buildApp({store, executor});
-	return {app, store, executor};
+	const batches = new BatchIndex();
+	const executor = new JobExecutor({store, scanners, scannerTimeoutMs: 5000, maxConcurrent});
+	const app = buildApp({store, executor, batches, maxBatchItems});
+	return {app, store, executor, batches};
 }
 
 const sampleBody = {
