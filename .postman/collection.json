@@ -7,7 +7,9 @@
 	},
 	"variable": [
 		{"key": "jobId", "value": ""},
-		{"key": "pollAttempts", "value": "0"}
+		{"key": "pollAttempts", "value": "0"},
+		{"key": "batchId", "value": ""},
+		{"key": "batchPollAttempts", "value": "0"}
 	],
 	"item": [
 		{
@@ -282,6 +284,157 @@
 			]
 		},
 		{
+			"name": "Batch",
+			"item": [
+				{
+					"name": "Submit batch (2 items)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"items\":[{\"textFiles\":{\"SKILL.md\":\"# Skill\"},\"allPaths\":[\"SKILL.md\"]},{\"textFiles\":{\"SKILL2.md\":\"# Skill 2\"},\"allPaths\":[\"SKILL2.md\"]}]}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 202\", function () {",
+									"    pm.response.to.have.status(202);",
+									"});",
+									"",
+									"const body = pm.response.json();",
+									"pm.test(\"response has a batchId\", function () {",
+									"    pm.expect(body.batchId).to.be.a(\"string\").and.not.empty;",
+									"});",
+									"pm.test(\"both items accepted, index-aligned\", function () {",
+									"    pm.expect(body.accepted.map((a) => a.index)).to.eql([0, 1]);",
+									"});",
+									"pm.test(\"rejected is present and empty\", function () {",
+									"    pm.expect(body.rejected).to.eql([]);",
+									"});",
+									"",
+									"pm.collectionVariables.set(\"batchId\", body.batchId);",
+									"pm.collectionVariables.set(\"batchPollAttempts\", \"0\");"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Submit batch with one bad item",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"items\":[{\"textFiles\":{\"SKILL.md\":\"# Skill\"},\"allPaths\":[\"SKILL.md\"]},{\"allPaths\":\"nope\"}]}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 202\", function () {",
+									"    pm.response.to.have.status(202);",
+									"});",
+									"",
+									"const body = pm.response.json();",
+									"pm.test(\"good item accepted at index 0\", function () {",
+									"    pm.expect(body.accepted.map((a) => a.index)).to.eql([0]);",
+									"});",
+									"pm.test(\"bad item rejected at index 1\", function () {",
+									"    pm.expect(body.rejected).to.have.lengthOf(1);",
+									"    pm.expect(body.rejected[0].index).to.eql(1);",
+									"});",
+									"",
+									"pm.collectionVariables.set(\"batchId\", body.batchId);",
+									"pm.collectionVariables.set(\"batchPollAttempts\", \"0\");"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Poll batch",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch/{{batchId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch", "{{batchId}}"]
+						},
+						"description": "Self-loops via postman.setNextRequest until every accepted item reaches a terminal state (capped at 60 attempts, same delay-request requirement as Poll job: minimal)."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const MAX_ATTEMPTS = 60;",
+									"",
+									"let attempts = parseInt(pm.collectionVariables.get(\"batchPollAttempts\") || \"0\", 10) + 1;",
+									"pm.collectionVariables.set(\"batchPollAttempts\", String(attempts));",
+									"",
+									"pm.test(\"status 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"const body = pm.response.json();",
+									"",
+									"pm.test(\"batch id echoes request\", function () {",
+									"    pm.expect(body.batchId).to.eql(pm.collectionVariables.get(\"batchId\"));",
+									"});",
+									"pm.test(\"no accepted entry carries a results key\", function () {",
+									"    for (const entry of body.accepted) {",
+									"        pm.expect(entry).to.not.have.property(\"results\");",
+									"    }",
+									"});",
+									"pm.test(\"accepted statuses are known values\", function () {",
+									"    const known = [\"queued\", \"running\", \"completed\", \"failed\", \"expired\"];",
+									"    for (const entry of body.accepted) {",
+									"        pm.expect(known).to.include(entry.status);",
+									"    }",
+									"});",
+									"",
+									"const pending = body.accepted.filter((a) => a.status === \"queued\" || a.status === \"running\");",
+									"if (pending.length > 0) {",
+									"    if (attempts < MAX_ATTEMPTS) {",
+									"        postman.setNextRequest(pm.info.requestName);",
+									"    } else {",
+									"        pm.test(\"batch reached a terminal state within \" + MAX_ATTEMPTS + \" polls\", function () {",
+									"            throw new Error(pending.length + \" item(s) still pending after \" + MAX_ATTEMPTS + \" polls\");",
+									"        });",
+									"    }",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
 			"name": "Error paths",
 			"item": [
 				{
@@ -417,6 +570,107 @@
 									"",
 									"pm.test(\"body is job-not-found error\", function () {",
 									"    pm.expect(pm.response.json()).to.eql({error: \"job not found\"});",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "POST /scans/batch, empty items -> 400",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"items\":[]}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 400\", function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test(\"error mentions items must not be empty\", function () {",
+									"    const body = pm.response.json();",
+									"    pm.expect(body.error).to.include(\"items\");",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "POST /scans/batch, items not an array -> 400",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"items\":\"nope\"}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 400\", function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test(\"error mentions items must be an array\", function () {",
+									"    const body = pm.response.json();",
+									"    pm.expect(body.error).to.include(\"array\");",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "GET /scans/batch/:id, unknown batch -> 404",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/scans/batch/00000000-0000-0000-0000-000000000000",
+							"host": ["{{baseUrl}}"],
+							"path": ["scans", "batch", "00000000-0000-0000-0000-000000000000"]
+						}
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"status 404\", function () {",
+									"    pm.response.to.have.status(404);",
+									"});",
+									"",
+									"pm.test(\"body is batch-not-found error\", function () {",
+									"    pm.expect(pm.response.json()).to.eql({error: \"batch not found\"});",
 									"});"
 								]
 							}
