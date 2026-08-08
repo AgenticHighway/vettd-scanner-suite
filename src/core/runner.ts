@@ -54,16 +54,23 @@ async function runOne(scanner: SkillScanner, input: ScannerInput, timeoutMs: num
 		clearTimeout(timer);
 		const durationMs = Date.now() - start;
 		const result = {...output, run: {...output.run, durationMs}};
-		logger.info(
-			{
-				module: "core.runner",
-				scannerId,
-				status: result.run.status,
-				duration_ms: durationMs,
-				findingCount: result.run.findingCount,
-			},
-			"scanner run completed",
-		);
+		// A scanner can resolve normally with status "errored" (e.g. the vettd
+		// adapter catching a shim fetch/HTTP failure and returning it as
+		// run.error instead of throwing) — that path never hit the catch block
+		// below, so its error text was silently dropped from every log line.
+		const logFields = {
+			module: "core.runner",
+			scannerId,
+			status: result.run.status,
+			duration_ms: durationMs,
+			findingCount: result.run.findingCount,
+			...(result.run.error ? {error: result.run.error} : {}),
+		};
+		if (result.run.status === "errored") {
+			logger.error(logFields, "scanner run completed");
+		} else {
+			logger.info(logFields, "scanner run completed");
+		}
 		return result;
 	} catch (err) {
 		clearTimeout(timer);
