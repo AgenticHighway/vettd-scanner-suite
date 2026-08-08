@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 
 import type {ScannerInput, ScannerOutput, SkillScanner} from "../../contract/scanner.js";
+import {logger} from "../../logger.js";
 import {runScanners} from "../runner.js";
 
 const TIMEOUT_MS = 120_000;
@@ -70,6 +71,43 @@ describe("runScanners", () => {
 		expect(badResult.run.status).toBe("errored");
 		expect(badResult.findings).toHaveLength(0);
 		expect(badResult.run.error).toBe("scanner exploded");
+	});
+
+	// Regression test: a scanner can resolve normally with status "errored"
+	// (e.g. an adapter catching its own HTTP failure) instead of throwing.
+	// That path bypassed the catch block entirely, so run.error was computed
+	// but never logged — "scanner run completed" showed status: "errored"
+	// with no indication of why. See vettd-skill-scanner shim 413s on large
+	// payloads for the real-world case this hid.
+	it("resolved-errored: logs run.error at error level even without a thrown exception", async () => {
+		const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => logger);
+		const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => logger);
+
+		const scanners = [
+			makeScanner("vettd", async () => ({
+				findings: [],
+				run: {
+					source: "vettd",
+					status: "errored",
+					findingCount: 0,
+					criticalCount: 0,
+					highCount: 0,
+					error: "shim error (413)",
+					scannedAt: new Date(),
+				},
+			})),
+		];
+		const result = await runScanners(scanners, baseInput, {timeoutMs: TIMEOUT_MS});
+
+		expect(result[0].run.status).toBe("errored");
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.objectContaining({scannerId: "vettd", status: "errored", error: "shim error (413)"}),
+			"scanner run completed",
+		);
+		expect(infoSpy).not.toHaveBeenCalledWith(expect.anything(), "scanner run completed");
+
+		errorSpy.mockRestore();
+		infoSpy.mockRestore();
 	});
 
 	it("all-timeout: all scanners return status timeout within deadline", async () => {
