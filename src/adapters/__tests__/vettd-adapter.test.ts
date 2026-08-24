@@ -173,4 +173,38 @@ describe("vettd scanner scan()", () => {
 		expect(result.run.status).toBe("errored");
 		expect(result.run.error).toBe("shim response parse failed");
 	});
+
+	it("passes signals through unmodified", async () => {
+		mockScanOk(
+			shimResponse({
+				signals: [
+					{
+						dataCategory: "characteristics",
+						sourceClass: "scan",
+						ruleId: "characteristics/declared-license",
+						observedAt: "2024-06-15T10:00:00.000Z",
+						severity: "blocker",
+					},
+				],
+			}),
+		);
+		const result = await makeScanner().scan(makeInput());
+
+		expect(result.signals).toHaveLength(1);
+		// Exact string — proves observedAt survived the trip unmodified and was
+		// NOT converted to a Date (the adapter must not transform signal fields).
+		expect(result.signals![0].observedAt).toBe("2024-06-15T10:00:00.000Z");
+		// The shim omits `source` on first-party output — the adapter does not fill
+		// signals (unlike findings), so it stays absent.
+		expect(result.signals![0].source).toBeUndefined();
+		// severity is an open string, not the AssetFinding severity union.
+		expect(result.signals![0].severity).toBe("blocker");
+	});
+
+	it("omits signals when the shim response has none", async () => {
+		mockScanOk();
+		const result = await makeScanner().scan(makeInput());
+		// Zero-signal run is byte-identical to today — no `signals` key emitted.
+		expect(result.signals).toBeUndefined();
+	});
 });
