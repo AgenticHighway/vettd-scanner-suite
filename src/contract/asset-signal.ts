@@ -21,18 +21,22 @@ export interface AssetSignal {
 	subjectId?: string;
 	relatedType?: string;
 	relatedId?: string;
-	userId?: string;
 	/** Open string — deliberately NOT the AssetFinding severity union. */
-	severity?: string;
-	label?: string;
-	detail?: string;
-	valueNum?: number;
-	valueText?: string;
-	unit?: string;
-	method?: string;
-	derivation?: string;
-	confidence?: number;
-	sampleSize?: number;
+	severity?: string | null;
+	label?: string | null;
+	detail?: string | null;
+	valueNum?: number | null;
+	valueText?: string | null;
+	unit?: string | null;
+	method?: string | null;
+	derivation?: string | null;
+	confidence?: number | null;
+	/**
+	 * Sample count the signal is based on. The wire contract allows an integer
+	 * or explicit null; TS cannot express "integer-only", so integer-ness must
+	 * be enforced at runtime on the suite side before this value is trusted.
+	 */
+	sampleSize?: number | null;
 	synthetic?: boolean;
-	payload?: unknown;
+	payload?: Record<string, unknown> | null;
 }
