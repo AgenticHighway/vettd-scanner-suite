@@ -3,12 +3,13 @@
 // POST /scan {textFiles, allPaths} → {findings, structural flags, version}.
 
 import type {ShimScannerConfig} from "../config/schema.js";
-import type {AssetFinding, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
+import type {AssetFinding, AssetSignal, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
 
 const VETTD_SOURCE_ID = "vettd";
 
 interface VettdShimResponse {
 	findings: AssetFinding[];
+	signals?: AssetSignal[];
 	hasSkillMd: boolean;
 	hasScripts: boolean;
 	hasReferences: boolean;
@@ -92,6 +93,7 @@ export function createVettdScanner(cfg: ShimScannerConfig): SkillScanner {
 
 			return {
 				findings,
+				signals: body.signals,
 				run: {
 					source: VETTD_SOURCE_ID,
 					version: String(body.scannerVersion),
