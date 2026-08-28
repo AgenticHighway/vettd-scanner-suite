@@ -1,6 +1,8 @@
 import type {AssetFinding} from "./asset-finding.js";
+import type {AssetSignal} from "./asset-signal.js";
 
 export type {AssetFinding};
+export type {AssetSignal};
 
 // Ported from vettd packages/api/src/external-scanners/types.ts, with
 // deliberate drops from the original:
@@ -32,6 +34,8 @@ export interface ScannerRunResult {
 export interface ScannerOutput {
 	findings: AssetFinding[];
 	run: ScannerRunResult;
+	/** Non-finding signals (first-party scanner only). Omitted when empty so a zero-signal run is byte-identical to today. */
+	signals?: AssetSignal[];
 }
 
 export interface SkillScanner {
