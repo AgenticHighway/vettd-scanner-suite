@@ -42,6 +42,27 @@ function shimResponse(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+// A coverage/attestation fixture shaped exactly like the Rust shim's
+// CoverageEntry over the wire: {kind, ruleId, label, detail, category?}.
+function coverageFixture() {
+	return [
+		{
+			kind: "attestation",
+			ruleId: "VTD-0091",
+			label: "Secrets scan passed",
+			detail: "No secrets or unsafe code patterns were detected.",
+			category: "safety",
+		},
+		{
+			kind: "coverage",
+			ruleId: "VTD-0099",
+			label: "Name validation passed",
+			detail: "The declared skill name follows the supported naming rules.",
+			// No category — the Rust shim omits `category` when unset.
+		},
+	];
+}
+
 function mockScanOk(body: object = shimResponse()) {
 	mockFetch.mockResolvedValueOnce({ok: true, json: async () => body} as unknown as Response);
 }
@@ -206,5 +227,55 @@ describe("vettd scanner scan()", () => {
 		const result = await makeScanner().scan(makeInput());
 		// Zero-signal run is byte-identical to today — no `signals` key emitted.
 		expect(result.signals).toBeUndefined();
+	});
+
+	// ─── coverage (vettd#941) ────────────────────────────────────────────────
+	// Coverage rides its own channel — separate from both `findings` and
+	// `signals`. The adapter must forward it verbatim, never merge it into the
+	// findings array and never transform the engine's values.
+
+	it("forwards coverage entries unmodified", async () => {
+		mockScanOk(shimResponse({coverage: coverageFixture()}));
+		const result = await makeScanner().scan(makeInput());
+
+		expect(result.coverage).toHaveLength(2);
+		// Exact identity — the adapter must not rename, drop, or re-shape any
+		// engine value on the coverage channel.
+		expect(result.coverage).toEqual(coverageFixture());
+	});
+
+	it("omits coverage when the shim omits the key (clean run)", async () => {
+		mockScanOk();
+		const result = await makeScanner().scan(makeInput());
+		// The Rust shim serializes coverage with skip_serializing_if, so a clean
+		// run emits NO coverage key — undefined, never []. Byte-identical to
+		// today when there is nothing to report.
+		expect(result.coverage).toBeUndefined();
+	});
+
+	it("keeps coverage independent of findings and signals", async () => {
+		mockScanOk(
+			shimResponse({
+				coverage: coverageFixture(),
+				signals: [
+					{
+						dataCategory: "characteristics",
+						sourceClass: "scan",
+						ruleId: "characteristics/declared-license",
+						observedAt: "2024-06-15T10:00:00.000Z",
+					},
+				],
+			}),
+		);
+		const result = await makeScanner().scan(makeInput());
+
+		// All three channels populated at once, none bleeding into another.
+		expect(result.coverage).toHaveLength(2);
+		expect(result.signals).toHaveLength(1);
+		expect(result.findings).toHaveLength(1);
+		// Coverage is a distinct field, not folded into findings.
+		for (const f of result.findings) expect(f).not.toHaveProperty("coverage");
+		// Coverage is a distinct field, not folded into signals.
+		for (const s of result.signals!) expect(s).not.toHaveProperty("kind");
 	});
 });
