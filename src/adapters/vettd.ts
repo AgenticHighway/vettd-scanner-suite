@@ -3,13 +3,16 @@
 // POST /scan {textFiles, allPaths} → {findings, structural flags, version}.
 
 import type {ShimScannerConfig} from "../config/schema.js";
-import type {AssetFinding, AssetSignal, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
+import type {AssetCoverageEntry, AssetFinding, AssetSignal, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
 
 const VETTD_SOURCE_ID = "vettd";
 
 interface VettdShimResponse {
 	findings: AssetFinding[];
 	signals?: AssetSignal[];
+	// Coverage/attestation facts (vettd#941). The Rust shim omits this key when
+	// the run produced none, so it is undefined (never []) for a clean run.
+	coverage?: AssetCoverageEntry[];
 	hasSkillMd: boolean;
 	hasScripts: boolean;
 	hasReferences: boolean;
@@ -94,6 +97,10 @@ export function createVettdScanner(cfg: ShimScannerConfig): SkillScanner {
 			return {
 				findings,
 				signals: body.signals,
+				// Forward coverage on its own channel, unmodified — the engine's
+				// values are the consumer's to persist, not the adapter's to
+				// transform (mirrors how `signals` rides through untouched).
+				coverage: body.coverage,
 				run: {
 					source: VETTD_SOURCE_ID,
 					version: String(body.scannerVersion),
