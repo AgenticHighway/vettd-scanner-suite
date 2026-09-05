@@ -115,6 +115,54 @@ describe("POST /scans", () => {
 		expect(store.get(body.jobId)).toBeDefined();
 	});
 
+	// vettd#1011 follow-up: bundlePath/repoPaths are optional, but when present must reach the
+	// scanner adapter unchanged — that's the whole point of accepting them.
+	it("forwards optional bundlePath and repoPaths to the scanner", async () => {
+		const scan = vi.fn().mockResolvedValue(fakeOutput("fake"));
+		const {app} = makeApp({scanners: [{id: "fake", available: async () => true, scan}]});
+		const res = await app.inject({
+			method: "POST",
+			url: "/scans",
+			payload: JSON.stringify({
+				...sampleBody,
+				bundlePath: "skills/pdf-tool",
+				repoPaths: ["SKILL.md", "references/shared.md", "skills/pdf-tool/SKILL.md"],
+			}),
+			headers: {"content-type": "application/json"},
+		});
+		expect(res.statusCode).toBe(202);
+		expect(scan).toHaveBeenCalledWith(
+			expect.objectContaining({
+				bundlePath: "skills/pdf-tool",
+				repoPaths: ["SKILL.md", "references/shared.md", "skills/pdf-tool/SKILL.md"],
+			}),
+		);
+	});
+
+	it("responds 400 when bundlePath is not a string", async () => {
+		const {app} = makeApp();
+		const res = await app.inject({
+			method: "POST",
+			url: "/scans",
+			payload: JSON.stringify({...sampleBody, bundlePath: 42}),
+			headers: {"content-type": "application/json"},
+		});
+		expect(res.statusCode).toBe(400);
+		expect((res.json() as {error: string}).error).toContain("bundlePath");
+	});
+
+	it("responds 400 when repoPaths is not an array of strings", async () => {
+		const {app} = makeApp();
+		const res = await app.inject({
+			method: "POST",
+			url: "/scans",
+			payload: JSON.stringify({...sampleBody, repoPaths: ["ok.md", 7]}),
+			headers: {"content-type": "application/json"},
+		});
+		expect(res.statusCode).toBe(400);
+		expect((res.json() as {error: string}).error).toContain("repoPaths");
+	});
+
 	// Malformed bodies must fail the submit itself — the caller should never
 	// have to poll to find out their JSON was rejected.
 	it("responds 400 for invalid JSON", async () => {

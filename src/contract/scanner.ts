@@ -15,6 +15,19 @@ export type {AssetSignal};
 export interface ScannerInput {
 	textFiles: Map<string, string>;
 	allPaths: string[];
+	/**
+	 * This skill's own directory, relative to the repository root (e.g. "skills/pdf-tool") —
+	 * absent when the caller has no repository concept (a bare zip upload). Forwarded to the
+	 * first-party scanner only (vettd#1011 follow-up); other adapters ignore it.
+	 */
+	bundlePath?: string;
+	/**
+	 * Every path in the repository, relative to the repository root — NOT scoped to this skill's
+	 * own subtree. Lets the first-party scanner resolve internal references to shared content
+	 * that lives outside the skill's own directory (e.g. a repo-root `references/` folder several
+	 * skills draw from). Absent when the caller has no repository concept.
+	 */
+	repoPaths?: string[];
 }
 
 /** Flat record describing a single scanner run. */

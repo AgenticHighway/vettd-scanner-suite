@@ -153,6 +153,30 @@ describe("vettd scanner scan()", () => {
 		expect(body.allPaths.sort()).toEqual(["SKILL.md", "scripts/run.sh"]);
 	});
 
+	it("forwards bundlePath and repoPaths to /scan when present", async () => {
+		mockScanOk();
+		await makeScanner().scan({
+			...makeInput({"SKILL.md": "content"}),
+			bundlePath: "skills/pdf-tool",
+			repoPaths: ["SKILL.md", "references/shared.md"],
+		});
+
+		const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+		const body = JSON.parse(init.body as string) as {bundlePath: string; repoPaths: string[]};
+		expect(body.bundlePath).toBe("skills/pdf-tool");
+		expect(body.repoPaths).toEqual(["SKILL.md", "references/shared.md"]);
+	});
+
+	it("omits bundlePath and repoPaths from the request when absent", async () => {
+		mockScanOk();
+		await makeScanner().scan(makeInput({"SKILL.md": "content"}));
+
+		const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+		const body = JSON.parse(init.body as string) as Record<string, unknown>;
+		expect(body).not.toHaveProperty("bundlePath");
+		expect(body).not.toHaveProperty("repoPaths");
+	});
+
 	it("configured shim_url is used", async () => {
 		mockScanOk();
 		await makeScanner({shimUrl: "http://127.0.0.1:9999"}).scan(makeInput());
