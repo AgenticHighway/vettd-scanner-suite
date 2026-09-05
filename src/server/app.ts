@@ -18,9 +18,13 @@ export interface AppDeps {
 // Body shape: matches ScannerInput with JSON-serializable textFiles (Record
 // instead of Map). Validated inline — oversized or malformed bodies fail the
 // request with a 400 so callers never have to poll to find out.
+// bundlePath/repoPaths are optional (vettd#1011 follow-up) — a caller with no
+// repository concept (a bare zip upload) omits them entirely.
 interface SubmitBody {
 	textFiles: Record<string, string>;
 	allPaths: string[];
+	bundlePath?: string;
+	repoPaths?: string[];
 }
 
 // Custom content-type parser for application/json. Captures the raw body as a
@@ -80,6 +84,19 @@ function validateScanItem(parsed: unknown): ItemValidation {
 			return {ok: false, error: "malformed body — 'textFiles' values must be strings"};
 		}
 	}
+	if (body.bundlePath !== undefined && typeof body.bundlePath !== "string") {
+		return {ok: false, error: "malformed body — 'bundlePath' must be a string"};
+	}
+	if (body.repoPaths !== undefined) {
+		if (!Array.isArray(body.repoPaths)) {
+			return {ok: false, error: "malformed body — 'repoPaths' must be an array of strings"};
+		}
+		for (const p of body.repoPaths) {
+			if (typeof p !== "string") {
+				return {ok: false, error: "malformed body — 'repoPaths' entries must be strings"};
+			}
+		}
+	}
 
 	// Size guards. Fail the request immediately — the executor never sees
 	// oversized input, and callers don't poll to find out.
@@ -108,7 +125,10 @@ function validateScanItem(parsed: unknown): ItemValidation {
 	// Build ScannerInput from validated JSON. Map is non-serializable, so
 	// the executor is the only consumer that needs it.
 	const textFiles = new Map(Object.entries(body.textFiles));
-	return {ok: true, input: {textFiles, allPaths: body.allPaths}};
+	return {
+		ok: true,
+		input: {textFiles, allPaths: body.allPaths, bundlePath: body.bundlePath, repoPaths: body.repoPaths},
+	};
 }
 
 // Body shape for POST /scans/batch: an ordered list of single-scan bodies.
