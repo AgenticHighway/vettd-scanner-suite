@@ -35,3 +35,12 @@ scan_timeout_ms = 30000
 # cisco-shim alone runs ~200 MiB RSS.
 concurrency = 1
 queue_depth = 50
+
+[scanners.jev]
+# Enabled for local E2E; the run is skipped (not failed) when OPENROUTER_API_KEY is not passed to
+# the suite container. Deliberately absent from scanner-suite.prod.toml.
+enabled = true
+model = "typesafe/jev-1.13"
+timeout_ms = 45000
+margin_threshold = 0.5
+max_payload_chars = 100000

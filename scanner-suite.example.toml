@@ -43,3 +43,17 @@ queue_depth = 50
 # Socket.dev dependency analysis (external SaaS; requires SOCKET_API_KEY).
 enabled = false
 timeout_ms = 30000
+
+[scanners.jev]
+# JEV rule scan: 39 typed questions over SKILL.md + scripts via OpenRouter's Decisions API, then one
+# aggregate severity call on the rules that clearly fired. External SaaS; requires OPENROUTER_API_KEY
+# (the run is skipped when it is unset). Experimental: vettd treats its results as advisory.
+enabled = false
+model = "typesafe/jev-1.13"
+endpoint = "https://openrouter.ai/api/alpha/decisions"
+# Per HTTP call (two calls per scan at most).
+timeout_ms = 45000
+# A rule fires only when P(fired) - P(none) >= this. 0.5 means P(fired) >= 0.75.
+margin_threshold = 0.5
+# Cap on the skill text sent, in characters.
+max_payload_chars = 100000
