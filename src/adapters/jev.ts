@@ -41,7 +41,12 @@ export type JevVerdict = (typeof VERDICTS)[number];
 
 export interface JevAnswer {
 	type?: string;
-	choice: string;
+	/** Choice questions. Score questions carry `score` + `legend` instead; see normalizeAnswer. */
+	choice?: string;
+	/** Score questions: the probability-weighted expected level (a fraction, NOT an index). */
+	score?: number;
+	legend?: Record<string, string>;
+	/** Keyed by option name for choice questions, by legend index for score questions. */
 	probabilities: Record<string, number>;
 	confidence: number;
 }
@@ -53,6 +58,8 @@ interface JevUsage {
 }
 
 export interface JevResponse {
+	/** The pinned model version that actually answered (e.g. "typesafe/jev-1.13-20260917"). */
+	model?: string;
 	answers: Record<string, JevAnswer>;
 	usage?: JevUsage;
 }
@@ -171,8 +178,36 @@ export interface RuleEvaluation {
 	level: string;
 }
 
-function evaluateRule(rule: JevRule, answer: JevAnswer, marginThreshold: number): RuleEvaluation {
-	const probs = answer.probabilities ?? {};
+/**
+ * Choice answers arrive as `{choice, probabilities: {none, present}}`. Score answers do not: the
+ * live API returns `{score, legend: {"0":"none","1":"mild","2":"strong"}, probabilities: {"0":..}}`
+ * (observed against jev-1.13; the public demo only shows the choice form). `score` is the
+ * probability-weighted expected level, not an index (0.02 when 98% of the mass is on "none"), so
+ * the chosen level is the legend entry with the most probability. Both forms are folded into the
+ * choice form so the margin logic has one shape to read. Returns null when the answer is unusable.
+ */
+export function normalizeAnswer(answer: JevAnswer): {choice: string; probabilities: Record<string, number>} | null {
+	if (typeof answer.choice === "string") return {choice: answer.choice, probabilities: answer.probabilities ?? {}};
+	const legend = answer.legend;
+	if (!legend) return null;
+	const probabilities: Record<string, number> = {};
+	let best: {label: string; p: number} | null = null;
+	for (const [index, p] of Object.entries(answer.probabilities ?? {})) {
+		const label = legend[index];
+		if (typeof label !== "string" || typeof p !== "number") continue;
+		probabilities[label] = p;
+		if (!best || p > best.p) best = {label, p};
+	}
+	return best ? {choice: best.label, probabilities} : null;
+}
+
+function evaluateRule(
+	rule: JevRule,
+	answer: JevAnswer,
+	normalized: {choice: string; probabilities: Record<string, number>},
+	marginThreshold: number,
+): RuleEvaluation {
+	const probs = normalized.probabilities;
 	const pNone = probs.none ?? 0;
 	const firedEntries = Object.entries(probs).filter(([option]) => option !== "none");
 	const firedMass = firedEntries.reduce((sum, [, p]) => sum + p, 0);
@@ -180,10 +215,10 @@ function evaluateRule(rule: JevRule, answer: JevAnswer, marginThreshold: number)
 	const top = firedEntries.sort((a, b) => b[1] - a[1])[0];
 	const level = top?.[0] ?? "present";
 	// `choice` must agree with the margin: jev picking "none" never fires, whatever the residue.
-	const fired = answer.choice !== "none" && margin >= marginThreshold;
+	const fired = normalized.choice !== "none" && margin >= marginThreshold;
 	return {
 		rule,
-		choice: answer.choice,
+		choice: normalized.choice,
 		probabilities: probs,
 		confidence: answer.confidence,
 		margin,
@@ -203,11 +238,12 @@ export function evaluateStage1(response: JevResponse, marginThreshold: number): 
 	const unanswered: string[] = [];
 	for (const rule of JEV_RULES) {
 		const answer = response.answers?.[rule.key];
-		if (!answer || typeof answer.choice !== "string") {
+		const normalized = answer ? normalizeAnswer(answer) : null;
+		if (!answer || !normalized) {
 			unanswered.push(rule.key);
 			continue;
 		}
-		evaluations.push(evaluateRule(rule, answer, marginThreshold));
+		evaluations.push(evaluateRule(rule, answer, normalized, marginThreshold));
 	}
 	return {evaluations, unanswered};
 }
@@ -413,7 +449,7 @@ export function createJevScanner(cfg: JevScannerConfig): SkillScanner {
 				...(signals.length > 0 ? {signals} : {}),
 				run: {
 					source: JEV_SOURCE_ID,
-					version: cfg.model,
+					version: stage1Response.model ?? cfg.model,
 					status: "success",
 					verdict: runVerdict,
 					findingCount: findings.length,
@@ -423,6 +459,7 @@ export function createJevScanner(cfg: JevScannerConfig): SkillScanner {
 					// false-positive analysis against the other scanners, without a schema change.
 					rawReport: {
 						model: cfg.model,
+						modelVersion: stage1Response.model ?? null,
 						marginThreshold: cfg.marginThreshold,
 						jevVerdict: verdict,
 						payload: {

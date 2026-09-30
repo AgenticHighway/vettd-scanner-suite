@@ -50,7 +50,7 @@ function stage1Response(overrides: Record<string, JevAnswer> = {}, cost = 0.0000
 	for (const rule of JEV_RULES) {
 		answers[rule.key] =
 			rule.kind === "score"
-				? {type: "score", choice: "none", probabilities: {none: 0.97, mild: 0.02, strong: 0.01}, confidence: 0.9}
+				? {type: "score", score: 0, legend: {"0": "none", "1": "mild", "2": "strong"}, probabilities: {"0": 0.97, "1": 0.02, "2": 0.01}, confidence: 0.9}
 				: answer(0.03);
 	}
 	return {answers: {...answers, ...overrides}, usage: {input_tokens: 800, output_tokens: 0, cost}};
@@ -168,6 +168,51 @@ describe("evaluateStage1 margin filter", () => {
 		const e = evaluateStage1(res, 0.5).evaluations.find((x) => x.rule.key === "unbounded_autonomy");
 		expect(e?.fired).toBe(true);
 		expect(e?.level).toBe("strong");
+	});
+
+	// Observed against the live API (jev-1.13): a score answer has no `choice`; it carries a numeric
+	// `score`, a `legend`, and index-keyed probabilities. Reading only `choice` left this rule
+	// permanently "unanswered" in both live runs, silently dropping the one graded rule.
+	it("reads a live-API score answer (score + legend, index-keyed probabilities)", () => {
+		const res = stage1Response({
+			unbounded_autonomy: {
+				type: "score",
+				score: 2,
+				legend: {"0": "none", "1": "mild", "2": "strong"},
+				probabilities: {"0": 0, "1": 0, "2": 1},
+				confidence: 1,
+			} as JevAnswer,
+		});
+		const {evaluations, unanswered} = evaluateStage1(res, 0.5);
+		expect(unanswered).toEqual([]);
+		const e = evaluations.find((x) => x.rule.key === "unbounded_autonomy");
+		expect(e).toMatchObject({fired: true, level: "strong", choice: "strong"});
+		expect(e?.probabilities).toEqual({none: 0, mild: 0, strong: 1});
+	});
+
+	// The live API's `score` is the probability-weighted expected level, so a mostly-"none" answer
+	// carries a fraction like 0.02, not an index. The first live run read it as an index and left
+	// the rule unanswered for every real skill except an extreme one.
+	it("takes the level from the probabilities, not from the fractional score", () => {
+		const res = stage1Response({
+			unbounded_autonomy: {
+				type: "score",
+				score: 0.02,
+				legend: {"0": "none", "1": "mild", "2": "strong"},
+				probabilities: {"0": 0.98, "1": 0.02, "2": 0},
+				confidence: 0.96,
+			} as JevAnswer,
+		});
+		const {evaluations, unanswered} = evaluateStage1(res, 0.5);
+		expect(unanswered).toEqual([]);
+		expect(evaluations.find((x) => x.rule.key === "unbounded_autonomy")).toMatchObject({choice: "none", fired: false});
+	});
+
+	it("treats a score answer with no usable legend or probabilities as unanswered", () => {
+		const res = stage1Response({
+			unbounded_autonomy: {type: "score", score: 9, legend: {"0": "none"}, probabilities: {"7": 1}, confidence: 1} as JevAnswer,
+		});
+		expect(evaluateStage1(res, 0.5).unanswered).toEqual(["unbounded_autonomy"]);
 	});
 
 	it("records unanswered rules instead of treating them as fired or clean", () => {
