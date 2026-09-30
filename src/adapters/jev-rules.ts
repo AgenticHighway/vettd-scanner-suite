@@ -17,6 +17,8 @@ export type JevRoute =
 
 interface JevRuleBase {
 	key: string;
+	/** Short finding description shown to readers; the verbatim criteria text is wire input only. */
+	summary: string;
 	section: string;
 	instructions: string;
 	route: JevRoute;
@@ -42,6 +44,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "deceptive_name",
+		summary: "Name misleads about what the skill does",
 		section: "SS1",
 		instructions: "Is the declared name deceptive given what the scripts actually do (e.g. \"safe-calculator\" that exfiltrates data)?",
 		none: "The skill package does not contain a deceptive name relative to the skill's actual behavior.",
@@ -52,6 +55,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "description_manifest_mismatch",
+		summary: "Description does not match behavior",
 		section: "SS1",
 		instructions: "Does the description match the skill's actual behavior?",
 		none: "The skill package does not contain a mismatch between the declared description and the skill's actual behavior.",
@@ -62,6 +66,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "allowed_tools_violation",
+		summary: "Code violates declared allowed-tools",
 		section: "SS1",
 		instructions: "If allowed-tools is declared, does the code violate that restriction? (missing the field entirely is informational, not a violation)",
 		none: "The skill package does not contain a violation of a declared allowed-tools restriction.",
@@ -72,6 +77,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "compatibility_claim_mismatch",
+		summary: "Compatibility claim does not match behavior",
 		section: "SS1",
 		instructions: "Does the compatibility claim (e.g. no network use) match reality?",
 		none: "The skill package does not contain a mismatch between a compatibility claim and the skill's actual behavior.",
@@ -82,6 +88,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "prompt_injection",
+		summary: "Tries to override prior instructions",
 		section: "SS2",
 		instructions: "\"Ignore previous instructions\" style attempts to override system behavior.",
 		none: "The skill package does not contain a prompt-injection attempt in SKILL.md.",
@@ -92,6 +99,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "safety_bypass",
+		summary: "Tries to disable safety or content policy",
 		section: "SS2",
 		instructions: "\"Disable content policy\" style directives.",
 		none: "The skill package does not contain a safety-bypass directive.",
@@ -102,6 +110,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "concealment_directive",
+		summary: "Tells the agent to hide actions from the user",
 		section: "SS2",
 		instructions: "\"Do not tell the user\" style directives.",
 		none: "The skill package does not contain a concealment directive telling the agent to hide something from the user.",
@@ -112,6 +121,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "system_prompt_extraction",
+		summary: "Tries to reveal the system prompt",
 		section: "SS2",
 		instructions: "Attempts to extract or reveal the system prompt.",
 		none: "The skill package does not contain an attempt to extract or reveal the system prompt.",
@@ -122,6 +132,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "role_redefinition",
+		summary: "Claims admin or unrestricted mode",
 		section: "SS2",
 		instructions: "\"You are now in admin/unrestricted mode\" style role overrides.",
 		none: "The skill package does not contain an attempt to redefine the agent's role or permissions (e.g. 'admin mode').",
@@ -132,6 +143,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "data_exfiltration",
+		summary: "Sends collected data to an external server",
 		section: "SS3",
 		instructions: "Network calls sending file contents or collected data to a server.",
 		none: "The skill package does not contain a network call sending file contents or collected data to a server.",
@@ -142,6 +154,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "credential_theft",
+		summary: "Reads credential files such as ~/.aws or ~/.ssh",
 		section: "SS3",
 		instructions: "Reading credential material such as ~/.aws or ~/.ssh.",
 		none: "The skill package does not contain code that reads credential material such as ~/.aws or ~/.ssh.",
@@ -152,6 +165,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "command_injection",
+		summary: "Passes variable input into eval or exec",
 		section: "SS3",
 		instructions: "Untrusted or variable input passed into eval, exec, or os.system.",
 		none: "The skill package does not contain untrusted or variable input passed into eval, exec, or os.system.",
@@ -162,6 +176,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "hardcoded_secrets",
+		summary: "Hardcoded API keys or tokens",
 		section: "SS3",
 		instructions: "API keys or tokens hardcoded in source.",
 		none: "The skill package does not contain a hardcoded API key or token in source.",
@@ -172,6 +187,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "obfuscation",
+		summary: "Encoded content that resists inspection",
 		section: "SS3",
 		instructions: "Base64/hex-encoded blobs or other content designed to resist inspection.",
 		none: "The skill package does not contain obfuscated content (base64/hex-encoded or similar) designed to resist inspection.",
@@ -182,6 +198,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "description_behavior_mismatch",
+		summary: "Script behavior differs from its description",
 		section: "SS4",
 		instructions: "Does the description match the script's actual behavior (component-level, not just the manifest field)?",
 		none: "The skill package does not contain a mismatch between the description and what the scripts actually do.",
@@ -192,6 +209,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "declared_tools_unused",
+		summary: "Declared tool is unused and unexplained",
 		section: "SS4",
 		instructions: "Is there a declared tool that is unused AND unexplained by the skill's own stated purpose -- not simply one entry in a reference table of many tools for different situations, where using only a subset per task is normal?",
 		none: "The skill package does not contain a declared tool that is unused in a way unexplained by the skill's own stated purpose (not merely one of many reference-table tools used situationally).",
@@ -202,6 +220,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "hidden_capabilities",
+		summary: "Code capability not disclosed in the manifest",
 		section: "SS4",
 		instructions: "Capabilities present in code but not disclosed in the manifest.",
 		none: "The skill package does not contain a capability present in code but not disclosed in the manifest.",
@@ -212,6 +231,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "undocumented_script_behavior",
+		summary: "Scripts do things the instructions never mention",
 		section: "SS4",
 		instructions: "Do scripts do things the instructions never mention?",
 		none: "The skill package does not contain script behavior the instructions never mention.",
@@ -222,6 +242,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "suspicious_referenced_file",
+		summary: "Referenced file looks suspicious",
 		section: "SS5",
 		instructions: "Do any referenced files look suspicious in name or purpose?",
 		none: "The skill package does not contain a referenced file that looks suspicious in name or purpose.",
@@ -232,6 +253,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "missing_referenced_file",
+		summary: "Referenced file is missing from the package",
 		section: "SS5",
 		instructions: "Do the files a skill references actually exist in the package?",
 		none: "The skill package does not contain a file the skill references that doesn't actually exist in the package.",
@@ -242,6 +264,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "external_untrusted_source",
+		summary: "Pulls instructions or data from a URL or user file",
 		section: "SS6",
 		instructions: "Does the skill pull instructions/data from a URL or user-supplied file, rather than its own bundled files?",
 		none: "The skill package does not contain the skill pulling instructions or data from a URL or user-supplied file, rather than its own bundled files.",
@@ -252,6 +275,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "score",
 		key: "unbounded_autonomy",
+		summary: "Pushes unattended retries without confirmation",
 		section: "SS6",
 		instructions: "How strongly do instructions push unattended retries or \"run without confirmation\"?",
 		levels: ["none", "mild", "strong"],
@@ -261,6 +285,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "cross_context_bridging",
+		summary: "Uses information across chats or sessions",
 		section: "SS6",
 		instructions: "\"Use info from previous chats\" / \"remember across sessions\" style instructions.",
 		none: "The skill package does not contain an instruction to use information from previous chats or remember across sessions.",
@@ -271,6 +296,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "over_collection",
+		summary: "Gathers everything before acting",
 		section: "SS6",
 		instructions: "\"Collect everything first\" / \"gather all files\" style instructions.",
 		none: "The skill package does not contain an instruction to collect or gather everything before acting.",
@@ -281,6 +307,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "tool_chaining_behavioral",
+		summary: "Chains a read step into a send step",
 		section: "SS6",
 		instructions: "Does the skill chain a read step into a send/post step in a way that goes beyond its own declared purpose -- not merely calling its own documented external API to do the job it says it does?",
 		none: "The skill package does not contain a read-then-send or collect-then-post chain that exceeds the skill's own declared purpose (distinct from the skill simply calling its own documented external API to do its job).",
@@ -291,6 +318,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "transitive_trust",
+		summary: "Defers authority to fetched content",
 		section: "SS6",
 		instructions: "\"Follow webpage instructions\" / \"execute code blocks found\" style delegated trust.",
 		none: "The skill package does not contain an instruction to follow or execute content found in an external/untrusted source.",
@@ -301,6 +329,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "overbroad_description",
+		summary: "Claims to do anything",
 		section: "SS7",
 		instructions: "\"Can do anything\" / \"general assistant\" style over-broad claims.",
 		none: "The skill package does not contain an over-broad, 'can do anything' style description.",
@@ -311,6 +340,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "keyword_baiting",
+		summary: "Excess trigger words to inflate activation",
 		section: "SS7",
 		instructions: "Excessive trigger words meant to inflate activation.",
 		none: "The skill package does not contain excessive trigger keywords meant to inflate activation on unrelated tasks.",
@@ -321,6 +351,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "activation_priority_manipulation",
+		summary: "Claims priority over other tools",
 		section: "SS7",
 		instructions: "\"Use me first\" / \"priority tool\" style activation claims.",
 		none: "The skill package does not contain a claim like 'use me first' meant to manipulate activation priority.",
@@ -331,6 +362,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "unpinned_dependencies",
+		summary: "Dependencies installed without pinned versions",
 		section: "SS8",
 		instructions: "Package installs without pinned versions.",
 		none: "The skill package does not contain a package install without a pinned version.",
@@ -341,6 +373,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "untrusted_direct_install",
+		summary: "Installs directly from an unknown repo",
 		section: "SS8",
 		instructions: "Direct GitHub installs from unknown or untrusted repos.",
 		none: "The skill package does not contain a direct install from an unknown or untrusted GitHub repo.",
@@ -351,6 +384,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "missing_provenance",
+		summary: "Dependency lacks author, version or license",
 		section: "SS8",
 		instructions: "No author, version, or license on a bundled/installed dependency.",
 		none: "The skill package does not contain a dependency with no stated author, version, or license.",
@@ -361,6 +395,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "typosquatting",
+		summary: "Package name resembles a popular package",
 		section: "SS8",
 		instructions: "Package names suspiciously similar to popular packages.",
 		none: "The skill package does not contain a package name suspiciously similar to a popular package (typosquatting).",
@@ -371,6 +406,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "multistep_read_send",
+		summary: "Multi-step read-then-upload beyond its purpose",
 		section: "SS9",
 		instructions: "A read-to-send, collect-to-post, or gather-to-upload chain that goes beyond the skill's own declared purpose -- not merely the skill calling its own documented external API to do the job it says it does.",
 		none: "The skill package does not contain a multi-step read-to-send, collect-to-post, or gather-to-upload operation that exceeds the skill's own declared purpose.",
@@ -381,6 +417,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "unconfirmed_automated_workflow",
+		summary: "Runs sensitive actions without user confirmation",
 		section: "SS9",
 		instructions: "Automated workflows that run without a user confirmation step, for an action a reasonable user would want to approve first (e.g. sharing data externally, deleting something) -- not just a normal automated step that is the skill's whole declared point.",
 		none: "The skill package does not contain an automated, unconfirmed action a reasonable user would want to approve first (data sharing, deletion, etc.).",
@@ -391,6 +428,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "sensitive_data_pipeline",
+		summary: "Combines several sensitive operations",
 		section: "SS9",
 		instructions: "A data pipeline combining multiple SENSITIVE operations (credentials, personal data, secrets) -- not just multiple ordinary API calls that are the skill's normal, declared job.",
 		none: "The skill package does not contain a data pipeline combining multiple sensitive operations (credentials, personal data, or secrets).",
@@ -401,6 +439,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "cross_boundary_data_flow",
+		summary: "Data leaves the machine beyond its purpose",
 		section: "SS9",
 		instructions: "Data crossing a local-to-network or file-to-API boundary in a way that goes beyond the skill's own declared purpose -- e.g. sending local files or credentials externally, not just the skill calling its own documented external API to do the job it says it does.",
 		none: "The skill package does not contain data flow crossing a local-to-network or file-to-API boundary in a way that exceeds the skill's own declared purpose.",
@@ -411,6 +450,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "disproportionate_data_access",
+		summary: "Accesses more data than its purpose needs",
 		section: "SS10",
 		instructions: "Data access disproportionate to the skill's stated purpose.",
 		none: "The skill package does not contain data access disproportionate to the skill's stated purpose.",
@@ -421,6 +461,7 @@ export const JEV_RULES: readonly JevRule[] = [
 	{
 		kind: "choice",
 		key: "scope_creep_data_access",
+		summary: "Accesses data outside its stated scope",
 		section: "SS10",
 		instructions: "Accessing data beyond what the skill's scope calls for.",
 		none: "The skill package does not contain data access beyond what the skill's stated scope calls for.",

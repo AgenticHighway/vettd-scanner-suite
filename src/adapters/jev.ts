@@ -299,12 +299,8 @@ function severityFor(rule: JevRule, level: string): AssetFinding["severity"] {
 		: (rule as JevChoiceRule).severity;
 }
 
-function detailFor(e: RuleEvaluation, model: string): string {
-	const what = findingText(e.rule);
-	return (
-		`${what.charAt(0).toUpperCase()}${what.slice(1)}. Judged by ${model} over the skill text as a whole ` +
-		`(no file location): fired at margin ${e.margin.toFixed(2)}, confidence ${e.confidence.toFixed(2)}.`
-	);
+function detailFor(e: RuleEvaluation): string {
+	return `${e.rule.summary}. Margin ${e.margin.toFixed(2)}, confidence ${e.confidence.toFixed(2)}.`;
 }
 
 export function mapFired(
@@ -317,7 +313,7 @@ export function mapFired(
 	for (const e of fired) {
 		const severity = severityFor(e.rule, e.level);
 		const label = `JEV: ${e.rule.key.replace(/_/g, " ")}`;
-		const detail = detailFor(e, model);
+		const detail = detailFor(e);
 		if (e.rule.route.type === "signal") {
 			signals.push({
 				dataCategory: e.rule.route.dataCategory,
