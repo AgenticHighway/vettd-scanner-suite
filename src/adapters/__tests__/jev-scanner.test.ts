@@ -327,6 +327,18 @@ describe("jev scanner", () => {
 			});
 		});
 
+		// Readers scan many findings at once: a short description plus the raw numbers, which are
+		// kept visible for now so the margin can be judged from the UI.
+		it("writes short details: a one-line summary, then margin and confidence", async () => {
+			const out = await run();
+			const pi = out.findings.find((f) => f.ruleId === "prompt_injection");
+			expect(pi?.detail).toBe("Tries to override prior instructions. Margin 0.94, confidence 0.90.");
+			for (const item of [...out.findings, ...(out.signals ?? [])]) {
+				expect(item.detail?.length).toBeLessThanOrEqual(90);
+				expect(item.detail).not.toContain("\u2014");
+			}
+		});
+
 		it("uses the aggregate verdict for the run and counts severities from findings", async () => {
 			const out = await run();
 			expect(out.run.verdict).toBe("fail");
