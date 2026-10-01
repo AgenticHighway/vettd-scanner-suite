@@ -1,48 +1,70 @@
-// The 39 JEV rule questions, ported verbatim from the public JEV scan demo
-// (vettd-beta /demo/jev-scan): instruction and criteria text are jev-1.13's wire input and must not
-// be paraphrased. Everything else on each row (severity, routing) is Vettd's own decision; see
-// vettd docs/spikes/jev-scan-emitter.md for the reasoning.
+// The System 1 rule set: typed questions a decision model answers over a skill's text. Regex
+// scanners and System 1 are mutually exclusive for non-safety rules (each owns its rules), while
+// safety rules overlap on purpose, under separate ids. Design record: vettd docs/system1-scanner.md.
 //
-// `section` groups rules for the stage-2 evidence list. The demo only showed the sections of the
-// rules that fired; the rest are inferred from the demo's contiguous question ordering.
+// Instruction and criteria text for the 34 safety questions is ported verbatim from the public
+// JEV scan demo and is wire input: it must not be paraphrased. Severity and routing are Vettd's
+// own decisions. `section` groups safety rules for the stage-2 evidence list; the demo only showed
+// the sections of the rules that fired, so the rest are inferred from its question ordering.
+//
+// Three emit kinds:
+// - finding: a safety judgment, written as an AssetFinding (category security) when it fires.
+// - signalFinding: a non-safety defect, written as a finding-shaped AssetSignal when it fires.
+// - classification: always written, one value per scan; may carry a severity when the value is a
+//   negative one (a finding implies a severity, but a severity does not imply a finding).
 
 import type {AssetFinding} from "../contract/scanner.js";
 
-export type JevSeverity = AssetFinding["severity"];
+export type System1Severity = AssetFinding["severity"];
 
-export type JevRoute =
-	| {type: "finding"}
-	/** Emitted as a finding-shaped signal under an already-registered rule, beside Vettd's own row. */
-	| {type: "signal"; dataCategory: string; ruleId: string};
-
-interface JevRuleBase {
+interface RuleBase {
+	/** The question key on the wire; stable, and the join key into rawReport answers. */
 	key: string;
-	/** Short finding description shown to readers; the verbatim criteria text is wire input only. */
+	/** Short description shown to readers; the verbatim criteria text is wire input only. */
 	summary: string;
 	section: string;
 	instructions: string;
-	route: JevRoute;
+	/** Vettd rule id: `S1-####` for safety findings, `<dataCategory>/<slug>` for signals. */
+	ruleId: string;
 }
 
-export interface JevChoiceRule extends JevRuleBase {
+export interface ChoiceRule extends RuleBase {
 	kind: "choice";
+	emit: "finding" | "signalFinding";
+	/** Required when emit is "signalFinding". */
+	dataCategory?: string;
 	none: string;
 	present: string;
-	severity: JevSeverity;
+	severity: System1Severity;
 }
 
-export interface JevScoreRule extends JevRuleBase {
+export interface ScoreRule extends RuleBase {
 	kind: "score";
+	emit: "finding";
 	levels: readonly string[];
 	/** Severity by non-"none" level. */
-	severityByLevel: Record<string, JevSeverity>;
+	severityByLevel: Record<string, System1Severity>;
 }
 
-export type JevRule = JevChoiceRule | JevScoreRule;
+export interface ClassificationRule extends RuleBase {
+	kind: "classification";
+	emit: "classification";
+	dataCategory: string;
+	/** Wire criteria by option value. Must include the option that means "absent". */
+	options: Record<string, string>;
+	/** The option that means the thing is absent or not applicable. */
+	absent: string;
+	/** Severity for the values that are negative; every other value carries none. */
+	severityByValue: Record<string, System1Severity>;
+}
 
-export const JEV_RULES: readonly JevRule[] = [
+export type System1Rule = ChoiceRule | ScoreRule | ClassificationRule;
+
+export const SYSTEM1_RULES: readonly System1Rule[] = [
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0001",
 		key: "deceptive_name",
 		summary: "Name misleads about what the skill does",
 		section: "SS1",
@@ -50,10 +72,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a deceptive name relative to the skill's actual behavior.",
 		present: "The skill package contains a deceptive name relative to the skill's actual behavior.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0002",
 		key: "description_manifest_mismatch",
 		summary: "Description does not match behavior",
 		section: "SS1",
@@ -61,10 +84,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a mismatch between the declared description and the skill's actual behavior.",
 		present: "The skill package contains a mismatch between the declared description and the skill's actual behavior.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0003",
 		key: "allowed_tools_violation",
 		summary: "Code violates declared allowed-tools",
 		section: "SS1",
@@ -72,10 +96,12 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a violation of a declared allowed-tools restriction.",
 		present: "The skill package contains a violation of a declared allowed-tools restriction.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "signalFinding",
+		dataCategory: "compatibility",
+		ruleId: "compatibility/claim-behavior-mismatch",
 		key: "compatibility_claim_mismatch",
 		summary: "Compatibility claim does not match behavior",
 		section: "SS1",
@@ -83,10 +109,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a mismatch between a compatibility claim and the skill's actual behavior.",
 		present: "The skill package contains a mismatch between a compatibility claim and the skill's actual behavior.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0004",
 		key: "prompt_injection",
 		summary: "Tries to override prior instructions",
 		section: "SS2",
@@ -94,10 +121,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a prompt-injection attempt in SKILL.md.",
 		present: "The skill package contains a prompt-injection attempt in SKILL.md.",
 		severity: "high",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0005",
 		key: "safety_bypass",
 		summary: "Tries to disable safety or content policy",
 		section: "SS2",
@@ -105,10 +133,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a safety-bypass directive.",
 		present: "The skill package contains a safety-bypass directive.",
 		severity: "high",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0006",
 		key: "concealment_directive",
 		summary: "Tells the agent to hide actions from the user",
 		section: "SS2",
@@ -116,10 +145,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a concealment directive telling the agent to hide something from the user.",
 		present: "The skill package contains a concealment directive telling the agent to hide something from the user.",
 		severity: "high",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0007",
 		key: "system_prompt_extraction",
 		summary: "Tries to reveal the system prompt",
 		section: "SS2",
@@ -127,10 +157,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an attempt to extract or reveal the system prompt.",
 		present: "The skill package contains an attempt to extract or reveal the system prompt.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0008",
 		key: "role_redefinition",
 		summary: "Claims admin or unrestricted mode",
 		section: "SS2",
@@ -138,10 +169,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an attempt to redefine the agent's role or permissions (e.g. 'admin mode').",
 		present: "The skill package contains an attempt to redefine the agent's role or permissions (e.g. 'admin mode').",
 		severity: "high",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0009",
 		key: "data_exfiltration",
 		summary: "Sends collected data to an external server",
 		section: "SS3",
@@ -149,10 +181,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a network call sending file contents or collected data to a server.",
 		present: "The skill package contains a network call sending file contents or collected data to a server.",
 		severity: "critical",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0010",
 		key: "credential_theft",
 		summary: "Reads credential files such as ~/.aws or ~/.ssh",
 		section: "SS3",
@@ -160,10 +193,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain code that reads credential material such as ~/.aws or ~/.ssh.",
 		present: "The skill package contains code that reads credential material such as ~/.aws or ~/.ssh.",
 		severity: "high",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0011",
 		key: "command_injection",
 		summary: "Passes variable input into eval or exec",
 		section: "SS3",
@@ -171,10 +205,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain untrusted or variable input passed into eval, exec, or os.system.",
 		present: "The skill package contains untrusted or variable input passed into eval, exec, or os.system.",
 		severity: "critical",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0012",
 		key: "hardcoded_secrets",
 		summary: "Hardcoded API keys or tokens",
 		section: "SS3",
@@ -182,10 +217,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a hardcoded API key or token in source.",
 		present: "The skill package contains a hardcoded API key or token in source.",
 		severity: "critical",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0013",
 		key: "obfuscation",
 		summary: "Encoded content that resists inspection",
 		section: "SS3",
@@ -193,10 +229,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain obfuscated content (base64/hex-encoded or similar) designed to resist inspection.",
 		present: "The skill package contains obfuscated content (base64/hex-encoded or similar) designed to resist inspection.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0014",
 		key: "description_behavior_mismatch",
 		summary: "Script behavior differs from its description",
 		section: "SS4",
@@ -204,10 +241,12 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a mismatch between the description and what the scripts actually do.",
 		present: "The skill package contains a mismatch between the description and what the scripts actually do.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "signalFinding",
+		dataCategory: "compatibility",
+		ruleId: "compatibility/unused-declared-tools",
 		key: "declared_tools_unused",
 		summary: "Declared tool is unused and unexplained",
 		section: "SS4",
@@ -215,10 +254,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a declared tool that is unused in a way unexplained by the skill's own stated purpose (not merely one of many reference-table tools used situationally).",
 		present: "The skill package contains a declared tool that is unused in a way unexplained by the skill's own stated purpose (not merely one of many reference-table tools used situationally).",
 		severity: "low",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0015",
 		key: "hidden_capabilities",
 		summary: "Code capability not disclosed in the manifest",
 		section: "SS4",
@@ -226,10 +266,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a capability present in code but not disclosed in the manifest.",
 		present: "The skill package contains a capability present in code but not disclosed in the manifest.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0016",
 		key: "undocumented_script_behavior",
 		summary: "Scripts do things the instructions never mention",
 		section: "SS4",
@@ -237,10 +278,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain script behavior the instructions never mention.",
 		present: "The skill package contains script behavior the instructions never mention.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0017",
 		key: "suspicious_referenced_file",
 		summary: "Referenced file looks suspicious",
 		section: "SS5",
@@ -248,21 +290,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a referenced file that looks suspicious in name or purpose.",
 		present: "The skill package contains a referenced file that looks suspicious in name or purpose.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
-		key: "missing_referenced_file",
-		summary: "Referenced file is missing from the package",
-		section: "SS5",
-		instructions: "Do the files a skill references actually exist in the package?",
-		none: "The skill package does not contain a file the skill references that doesn't actually exist in the package.",
-		present: "The skill package contains a file the skill references that doesn't actually exist in the package.",
-		severity: "low",
-		route: {type: "signal", dataCategory: "reliability", ruleId: "reliability/unresolvable-internal-references"},
-	},
-	{
-		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0018",
 		key: "external_untrusted_source",
 		summary: "Pulls instructions or data from a URL or user file",
 		section: "SS6",
@@ -270,20 +302,22 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain the skill pulling instructions or data from a URL or user-supplied file, rather than its own bundled files.",
 		present: "The skill package contains the skill pulling instructions or data from a URL or user-supplied file, rather than its own bundled files.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "score",
+		emit: "finding",
+		ruleId: "S1-0019",
 		key: "unbounded_autonomy",
 		summary: "Pushes unattended retries without confirmation",
 		section: "SS6",
 		instructions: "How strongly do instructions push unattended retries or \"run without confirmation\"?",
 		levels: ["none", "mild", "strong"],
 		severityByLevel: {mild: "low", strong: "medium"},
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0020",
 		key: "cross_context_bridging",
 		summary: "Uses information across chats or sessions",
 		section: "SS6",
@@ -291,10 +325,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an instruction to use information from previous chats or remember across sessions.",
 		present: "The skill package contains an instruction to use information from previous chats or remember across sessions.",
 		severity: "low",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0021",
 		key: "over_collection",
 		summary: "Gathers everything before acting",
 		section: "SS6",
@@ -302,10 +337,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an instruction to collect or gather everything before acting.",
 		present: "The skill package contains an instruction to collect or gather everything before acting.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0022",
 		key: "tool_chaining_behavioral",
 		summary: "Chains a read step into a send step",
 		section: "SS6",
@@ -313,10 +349,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a read-then-send or collect-then-post chain that exceeds the skill's own declared purpose (distinct from the skill simply calling its own documented external API to do its job).",
 		present: "The skill package contains a read-then-send or collect-then-post chain that exceeds the skill's own declared purpose (distinct from the skill simply calling its own documented external API to do its job).",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0023",
 		key: "transitive_trust",
 		summary: "Defers authority to fetched content",
 		section: "SS6",
@@ -324,10 +361,12 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an instruction to follow or execute content found in an external/untrusted source.",
 		present: "The skill package contains an instruction to follow or execute content found in an external/untrusted source.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "signalFinding",
+		dataCategory: "reliability",
+		ruleId: "reliability/scope-overclaim",
 		key: "overbroad_description",
 		summary: "Claims to do anything",
 		section: "SS7",
@@ -335,10 +374,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an over-broad, 'can do anything' style description.",
 		present: "The skill package contains an over-broad, 'can do anything' style description.",
 		severity: "low",
-		route: {type: "signal", dataCategory: "reliability", ruleId: "reliability/description-overclaim"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0024",
 		key: "keyword_baiting",
 		summary: "Excess trigger words to inflate activation",
 		section: "SS7",
@@ -346,10 +386,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain excessive trigger keywords meant to inflate activation on unrelated tasks.",
 		present: "The skill package contains excessive trigger keywords meant to inflate activation on unrelated tasks.",
 		severity: "low",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0025",
 		key: "activation_priority_manipulation",
 		summary: "Claims priority over other tools",
 		section: "SS7",
@@ -357,21 +398,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a claim like 'use me first' meant to manipulate activation priority.",
 		present: "The skill package contains a claim like 'use me first' meant to manipulate activation priority.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
-		key: "unpinned_dependencies",
-		summary: "Dependencies installed without pinned versions",
-		section: "SS8",
-		instructions: "Package installs without pinned versions.",
-		none: "The skill package does not contain a package install without a pinned version.",
-		present: "The skill package contains a package install without a pinned version.",
-		severity: "low",
-		route: {type: "signal", dataCategory: "compatibility", ruleId: "compatibility/unpinned-dependencies"},
-	},
-	{
-		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0026",
 		key: "untrusted_direct_install",
 		summary: "Installs directly from an unknown repo",
 		section: "SS8",
@@ -379,10 +410,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a direct install from an unknown or untrusted GitHub repo.",
 		present: "The skill package contains a direct install from an unknown or untrusted GitHub repo.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0027",
 		key: "missing_provenance",
 		summary: "Dependency lacks author, version or license",
 		section: "SS8",
@@ -390,10 +422,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a dependency with no stated author, version, or license.",
 		present: "The skill package contains a dependency with no stated author, version, or license.",
 		severity: "low",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0028",
 		key: "typosquatting",
 		summary: "Package name resembles a popular package",
 		section: "SS8",
@@ -401,10 +434,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a package name suspiciously similar to a popular package (typosquatting).",
 		present: "The skill package contains a package name suspiciously similar to a popular package (typosquatting).",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0029",
 		key: "multistep_read_send",
 		summary: "Multi-step read-then-upload beyond its purpose",
 		section: "SS9",
@@ -412,10 +446,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a multi-step read-to-send, collect-to-post, or gather-to-upload operation that exceeds the skill's own declared purpose.",
 		present: "The skill package contains a multi-step read-to-send, collect-to-post, or gather-to-upload operation that exceeds the skill's own declared purpose.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0030",
 		key: "unconfirmed_automated_workflow",
 		summary: "Runs sensitive actions without user confirmation",
 		section: "SS9",
@@ -423,10 +458,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain an automated, unconfirmed action a reasonable user would want to approve first (data sharing, deletion, etc.).",
 		present: "The skill package contains an automated, unconfirmed action a reasonable user would want to approve first (data sharing, deletion, etc.).",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0031",
 		key: "sensitive_data_pipeline",
 		summary: "Combines several sensitive operations",
 		section: "SS9",
@@ -434,10 +470,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain a data pipeline combining multiple sensitive operations (credentials, personal data, or secrets).",
 		present: "The skill package contains a data pipeline combining multiple sensitive operations (credentials, personal data, or secrets).",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0032",
 		key: "cross_boundary_data_flow",
 		summary: "Data leaves the machine beyond its purpose",
 		section: "SS9",
@@ -445,10 +482,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain data flow crossing a local-to-network or file-to-API boundary in a way that exceeds the skill's own declared purpose.",
 		present: "The skill package contains data flow crossing a local-to-network or file-to-API boundary in a way that exceeds the skill's own declared purpose.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0033",
 		key: "disproportionate_data_access",
 		summary: "Accesses more data than its purpose needs",
 		section: "SS10",
@@ -456,10 +494,11 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain data access disproportionate to the skill's stated purpose.",
 		present: "The skill package contains data access disproportionate to the skill's stated purpose.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
 	{
 		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0034",
 		key: "scope_creep_data_access",
 		summary: "Accesses data outside its stated scope",
 		section: "SS10",
@@ -467,6 +506,138 @@ export const JEV_RULES: readonly JevRule[] = [
 		none: "The skill package does not contain data access beyond what the skill's stated scope calls for.",
 		present: "The skill package contains data access beyond what the skill's stated scope calls for.",
 		severity: "medium",
-		route: {type: "finding"},
 	},
-];
+	{
+		kind: "choice",
+		emit: "signalFinding",
+		dataCategory: "compatibility",
+		ruleId: "compatibility/undeclared-environment-assumptions",
+		key: "undeclared_environment_assumptions",
+		summary: "Assumes an OS, tool or network access it never declares",
+		section: "SS12",
+		instructions: "Do the instructions or scripts assume an operating system, installed tool, harness or network access that the skill never declares?",
+		none: "The skill package does not contain an undeclared assumption about the operating system, installed tools, harness or network access.",
+		present: "The skill package contains an undeclared assumption about the operating system, installed tools, harness or network access.",
+		severity: "low",
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/instruction-clarity",
+		key: "instruction_clarity",
+		summary: "Instruction clarity",
+		section: "SS11",
+		instructions: "How clear are the SKILL.md instructions for an agent that has only this text to go on? Generic wording is only a problem when it leaves the agent without guidance it needs.",
+		options: {
+			clear: "The instructions are specific enough to follow without guessing. Generic wording that does not leave the agent short of guidance counts as clear.",
+			underspecified: "The instructions use generic wording (e.g. 'follow best practices') that leaves the agent without guidance it needs.",
+			ambiguous: "The instructions can reasonably be read in more than one way, or depend on context that is never stated.",
+			contradictory: "The instructions contradict each other.",
+		},
+		absent: "clear",
+		severityByValue: {underspecified: "low", ambiguous: "medium", contradictory: "medium"},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/usage-context",
+		key: "usage_context",
+		summary: "Usage context in the description",
+		section: "SS11",
+		instructions: "Does the description tell an agent when to use this skill?",
+		options: {
+			explicit: "The description states when the skill should be used (triggers, situations or request types).",
+			implied: "The description lets a reader infer when to use the skill but never says so.",
+			missing: "The description gives no indication of when to use the skill.",
+		},
+		absent: "missing",
+		severityByValue: {missing: "low"},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/example-quality",
+		key: "example_quality",
+		summary: "Example quality",
+		section: "SS11",
+		instructions: "Does the skill include examples, and do they agree with its instructions?",
+		options: {
+			none: "The skill includes no examples of its use or expected output.",
+			inconsistent: "The skill includes examples that contradict its instructions or could not work as written.",
+			consistent: "The skill includes examples that agree with its instructions and could work as written.",
+		},
+		absent: "none",
+		severityByValue: {none: "low", inconsistent: "medium"},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/failure-guidance",
+		key: "failure_guidance",
+		summary: "Failure guidance",
+		section: "SS11",
+		instructions: "Does the skill say what the agent should do when a step fails?",
+		options: {
+			none: "The skill gives no guidance on handling a failed step.",
+			partial: "The skill covers some failure cases but leaves obvious ones open.",
+			explicit: "The skill says what to do when its main steps fail.",
+		},
+		absent: "none",
+		severityByValue: {none: "low"},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/validation-guidance",
+		key: "validation_guidance",
+		summary: "Validation guidance",
+		section: "SS11",
+		instructions: "Does the skill tell the agent to check or verify its own output before finishing?",
+		options: {
+			none: "The skill does not tell the agent to verify its work.",
+			present: "The skill tells the agent to check or verify its output (a validation or verification step).",
+		},
+		absent: "none",
+		severityByValue: {},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/workflow-structure",
+		key: "workflow_structure",
+		summary: "Workflow structure",
+		section: "SS11",
+		instructions: "Does the skill lay out its work as an ordered workflow?",
+		options: {
+			unstructured: "The skill describes its work as loose prose with no clear order of steps.",
+			structured: "The skill lays out an ordered sequence of steps or phases.",
+		},
+		absent: "unstructured",
+		severityByValue: {},
+	},
+	{
+		kind: "classification",
+		emit: "classification",
+		dataCategory: "reliability",
+		ruleId: "reliability/pitfall-coverage",
+		key: "pitfall_coverage",
+		summary: "Pitfall coverage",
+		section: "SS11",
+		instructions: "Does the skill call out common mistakes, gotchas or known pitfalls?",
+		options: {
+			none: "The skill does not mention common mistakes or pitfalls.",
+			present: "The skill calls out common mistakes, gotchas or known pitfalls.",
+		},
+		absent: "none",
+		severityByValue: {},
+	},
+] as const;
+
+/** Safety questions: the only ones whose findings go to the stage-2 aggregate. */
+export const SAFETY_RULES: readonly System1Rule[] = SYSTEM1_RULES.filter((r) => r.emit === "finding");
