@@ -16,7 +16,6 @@ export const DEFAULT_SCAN_TIMEOUT_MS = 30_000;
 export const DEFAULT_CISCO_QUEUE_DEPTH = 50;
 export const DEFAULT_SOCKET_TIMEOUT_MS = 30_000;
 export const DEFAULT_SYSTEM1_MODEL = "typesafe/jev-1.13";
-export const DEFAULT_SYSTEM1_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 // Per call (rule scan, then aggregate), so a full run stays inside jobs.scannerTimeoutMs.
 export const DEFAULT_SYSTEM1_TIMEOUT_MS = 45_000;
 export const DEFAULT_SYSTEM1_MARGIN_THRESHOLD = 0.5;
@@ -61,13 +60,12 @@ export interface SocketScannerConfig {
 
 /**
  * System 1: typed-question decision model, served by OpenRouter's Decisions API (external SaaS, no
- * shim). OPENROUTER_API_KEY comes from the
- * environment.
+ * shim). OPENROUTER_API_KEY comes from the environment. The endpoint is deliberately not
+ * configurable: the key is only ever sent to the origin pinned in the connector.
  */
 export interface System1ScannerConfig {
 	enabled: boolean;
 	model: string;
-	endpoint: string;
 	/** Per HTTP call. */
 	timeoutMs: number;
 	/**

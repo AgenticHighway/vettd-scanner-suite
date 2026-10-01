@@ -50,7 +50,6 @@ timeout_ms = 30000
 # OPENROUTER_API_KEY (the run is skipped when it is unset).
 enabled = false
 model = "typesafe/jev-1.13"
-endpoint = "https://openrouter.ai/api/alpha/decisions"
 # Per HTTP call (two calls per scan at most).
 timeout_ms = 45000
 # A rule fires only when P(fired) - P(none) >= this. 0.5 means P(fired) >= 0.75.

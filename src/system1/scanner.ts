@@ -10,7 +10,7 @@ import {evaluateStage1, type RuleEvaluation} from "./evaluate.js";
 import {findingText, mapEvaluations} from "./map.js";
 import {buildPayload, skillNameFromPayload} from "./payload.js";
 import {SAFETY_RULES, SYSTEM1_RULES} from "./rules.js";
-import {type AggregateVerdict, type DecisionConnector, SYSTEM1_SOURCE_ID} from "./types.js";
+import {type AggregateVerdict, type DecisionConnector, errorCode, SYSTEM1_SOURCE_ID} from "./types.js";
 
 const MODULE = "external-scanners.system1";
 
@@ -67,14 +67,16 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 			try {
 				stage1Response = await connector.askRules(skillName, payload.text, SYSTEM1_RULES);
 			} catch (err) {
-				const isTimeout = err instanceof Error && err.name === "TimeoutError";
-				logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, err}, "system1 rule scan failed");
-				return emptyRun(isTimeout ? "timeout" : "errored", startedAt, scannedAt, err instanceof Error ? err.message : String(err));
+				const code = errorCode(err);
+				logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 rule scan failed");
+				return emptyRun(code === "timeout" ? "timeout" : "errored", startedAt, scannedAt, code);
 			}
 
 			const {evaluations, unanswered} = evaluateStage1(stage1Response, cfg.marginThreshold);
-			if (evaluations.length === 0) {
-				return emptyRun("errored", startedAt, scannedAt, "system1 answered none of the rule questions");
+			// A partial answer set would read as "nothing found" for the missing rules; fail instead.
+			if (unanswered.length > 0) {
+				logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, unanswered: unanswered.length}, "system1 answered incompletely");
+				return emptyRun("errored", startedAt, scannedAt, `system1 answered ${evaluations.length} of ${SYSTEM1_RULES.length} rule questions`);
 			}
 			const {findings, signals} = mapEvaluations(evaluations, cfg.model, scannedAt.toISOString());
 
@@ -95,8 +97,9 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 					stage2 = {answer: result.answer, usage: result.usage};
 					if (!verdict) stage2.error = "unrecognized verdict choice";
 				} catch (err) {
-					stage2 = {error: err instanceof Error ? err.message : String(err)};
-					logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, err}, "system1 aggregate call failed; deriving verdict from findings");
+					const code = errorCode(err);
+					stage2 = {error: code};
+					logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 aggregate call failed; deriving verdict from findings");
 				}
 			}
 			// With no safety finding the aggregate says nothing about severities carried by signals.

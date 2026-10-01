@@ -7,7 +7,6 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
-	DEFAULT_SYSTEM1_ENDPOINT,
 	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
 	DEFAULT_SYSTEM1_MAX_PAYLOAD_CHARS,
 	DEFAULT_SYSTEM1_MODEL,
@@ -148,7 +147,7 @@ export function parseConfig(toml: string): SuiteConfig {
 	const system1 = optionalTable(scanners, "system1", "scanners.system1");
 	checkKeys(
 		system1,
-		["enabled", "model", "endpoint", "timeout_ms", "margin_threshold", "max_payload_chars"],
+		["enabled", "model", "timeout_ms", "margin_threshold", "max_payload_chars"],
 		"scanners.system1",
 	);
 
@@ -176,7 +175,6 @@ export function parseConfig(toml: string): SuiteConfig {
 			system1: {
 				enabled: readBool(system1, "enabled", false, "scanners.system1"),
 				model: readHost(system1, "model", DEFAULT_SYSTEM1_MODEL, "scanners.system1"),
-				endpoint: readUrl(system1, "endpoint", DEFAULT_SYSTEM1_ENDPOINT, "scanners.system1"),
 				timeoutMs: readPositiveInt(system1, "timeout_ms", DEFAULT_SYSTEM1_TIMEOUT_MS, "scanners.system1"),
 				marginThreshold: readUnitInterval(system1, "margin_threshold", DEFAULT_SYSTEM1_MARGIN_THRESHOLD, "scanners.system1"),
 				maxPayloadChars: readPositiveInt(system1, "max_payload_chars", DEFAULT_SYSTEM1_MAX_PAYLOAD_CHARS, "scanners.system1"),
