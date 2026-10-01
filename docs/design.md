@@ -17,8 +17,8 @@ client ── POST /scans (JSON) ───────────────�
       ┌─────────────┼──────────────────┐
       ▼             ▼                  ▼
  vettd adapter  cisco adapter     socket adapter        ← adapters/ (TS, in-repo)
-      │             │                  │
-      ▼             ▼                  ▼
+      │             │                  │                (jev adapter: same shape as socket,
+      ▼             ▼                  ▼                 talks to OpenRouter directly)
  Rust http-shim  Python shim      api.socket.dev        ← transports
  (scanner repo)  (shims/cisco)    (external SaaS)
 ```
@@ -187,10 +187,16 @@ explicit.
 | `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
+| `scanners.jev.enabled` | `false` | JEV rule scan (OpenRouter Decisions API); experimental, advisory in vettd |
+| `scanners.jev.model` / `.endpoint` | `typesafe/jev-1.13` / OpenRouter `/api/alpha/decisions` | Model and Decisions endpoint |
+| `scanners.jev.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
+| `scanners.jev.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
+| `scanners.jev.max_payload_chars` | `100000` | Cap on the SKILL.md + scripts text sent |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 
-- `SOCKET_API_KEY` — secret; secrets never go in the config file or git.
+- `SOCKET_API_KEY`, `OPENROUTER_API_KEY` — secrets; secrets never go in the config file or git.
+  A missing `OPENROUTER_API_KEY` makes the jev run `skipped`, not failed.
 - `LOG_LEVEL`, `LOG_PRETTY` — operator log plumbing, not scanner config.
 - `VETTD_SHIM_PORT`, `CISCO_SHIM_PORT` — belong to the shim *processes*; the
   suite only knows the URLs its adapters dial.

@@ -2,6 +2,7 @@
 // (EXTERNAL_SCANNERS) — enablement comes exclusively from the TOML config.
 
 import {createCiscoScanner} from "../adapters/cisco.js";
+import {createJevScanner} from "../adapters/jev.js";
 import {createSocketScanner} from "../adapters/socket.js";
 import {createVettdScanner} from "../adapters/vettd.js";
 import type {SuiteConfig} from "../config/schema.js";
@@ -9,7 +10,7 @@ import type {SkillScanner} from "../contract/scanner.js";
 
 /**
  * Instantiates the enabled scanners in fixed order: vettd first, then cisco,
- * then socket. Config declares enablement, not order — run order is a suite
+ * then socket, then jev. Config declares enablement, not order — run order is a suite
  * decision so results stay stable across config layouts.
  */
 export function buildScanners(config: SuiteConfig): SkillScanner[] {
@@ -17,5 +18,6 @@ export function buildScanners(config: SuiteConfig): SkillScanner[] {
 	if (config.scanners.vettd.enabled) scanners.push(createVettdScanner(config.scanners.vettd));
 	if (config.scanners.cisco.enabled) scanners.push(createCiscoScanner(config.scanners.cisco));
 	if (config.scanners.socket.enabled) scanners.push(createSocketScanner(config.scanners.socket));
+	if (config.scanners.jev.enabled) scanners.push(createJevScanner(config.scanners.jev));
 	return scanners;
 }

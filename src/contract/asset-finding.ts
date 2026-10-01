@@ -30,4 +30,8 @@ export interface AssetFinding {
 	source?: string;
 	/** Rule identifier — VTD-#### for vettd-native findings, upstream id (e.g. AITech-1.1.1) for external scanners */
 	ruleId?: string;
+	/** How the emitter reached this finding; open string, same reserved vocabulary as AssetSignal.derivation. Null = not stated; deterministic scanners never set it. */
+	derivation?: string | null;
+	/** Emitter confidence in the finding, 0-1 inclusive. Null must never be read as zero confidence. */
+	confidence?: number | null;
 }
