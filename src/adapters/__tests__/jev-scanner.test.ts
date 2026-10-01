@@ -327,16 +327,33 @@ describe("jev scanner", () => {
 			});
 		});
 
-		// Readers scan many findings at once: a short description plus the raw numbers, which are
-		// kept visible for now so the margin can be judged from the UI.
-		it("writes short details: a one-line summary, then margin and confidence", async () => {
+		// Readers scan many findings at once: one short human sentence each. The numbers are a
+		// row facet, not prose (they sit in the `confidence` column), and the margin stays
+		// recoverable from run.rawReport for offline threshold work.
+		it("writes number-free details: the one-line summary only", async () => {
 			const out = await run();
 			const pi = out.findings.find((f) => f.ruleId === "prompt_injection");
-			expect(pi?.detail).toBe("Tries to override prior instructions. Margin 0.94, confidence 0.90.");
+			expect(pi?.detail).toBe("Tries to override prior instructions.");
 			for (const item of [...out.findings, ...(out.signals ?? [])]) {
 				expect(item.detail?.length).toBeLessThanOrEqual(90);
 				expect(item.detail).not.toContain("\u2014");
+				expect(item.detail).not.toContain("Margin");
+				expect(item.detail).not.toMatch(/\d/);
 			}
+		});
+
+		// The facet, not the prose, carries the number: an inferred finding must state its
+		// derivation and confidence on the row itself, with the confidence equal to the model's
+		// own answer confidence (mirrors the shape validator's rule for inferred signal rows).
+		it("stamps every fired finding with derivation 'inferred' and the answer's confidence", async () => {
+			const out = await run();
+			for (const f of out.findings) {
+				expect(f.derivation).toBe("inferred");
+				expect(typeof f.confidence).toBe("number");
+				expect(f.confidence).toBeGreaterThanOrEqual(0);
+				expect(f.confidence).toBeLessThanOrEqual(1);
+			}
+			expect(out.findings.find((f) => f.ruleId === "prompt_injection")?.confidence).toBe(0.9);
 		});
 
 		it("uses the aggregate verdict for the run and counts severities from findings", async () => {

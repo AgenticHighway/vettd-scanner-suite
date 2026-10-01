@@ -299,8 +299,10 @@ function severityFor(rule: JevRule, level: string): AssetFinding["severity"] {
 		: (rule as JevChoiceRule).severity;
 }
 
+// The number lives on the row's `confidence` facet, not in the prose: detail stays one
+// short human sentence, and the margin remains recoverable from run.rawReport.
 function detailFor(e: RuleEvaluation): string {
-	return `${e.rule.summary}. Margin ${e.margin.toFixed(2)}, confidence ${e.confidence.toFixed(2)}.`;
+	return `${e.rule.summary}.`;
 }
 
 export function mapFired(
@@ -336,6 +338,8 @@ export function mapFired(
 				severity,
 				source: JEV_SOURCE_ID,
 				ruleId: e.rule.key,
+				derivation: "inferred",
+				confidence: e.confidence,
 			});
 		}
 	}
