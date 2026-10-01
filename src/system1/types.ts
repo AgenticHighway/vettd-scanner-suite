@@ -49,6 +49,23 @@ export interface AggregateResult {
 	cost: number;
 }
 
+/** Controlled failure codes: the only error detail persisted or logged, never upstream text. */
+export type DecisionErrorCode = "no_key" | "timeout" | "network" | "http_error" | "protocol";
+
+export class DecisionError extends Error {
+	constructor(
+		readonly code: DecisionErrorCode,
+		readonly status?: number,
+	) {
+		super(status ? `${code} ${status}` : code);
+		this.name = "DecisionError";
+	}
+}
+
+export function errorCode(err: unknown): string {
+	return err instanceof DecisionError ? err.message : "unexpected";
+}
+
 export interface DecisionConnector {
 	/** The model the connector is configured for (before any version pinning). */
 	readonly model: string;

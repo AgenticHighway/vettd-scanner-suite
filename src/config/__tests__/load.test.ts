@@ -33,7 +33,6 @@ timeout_ms = 15000
 [scanners.system1]
 enabled = true
 model = "typesafe/jev-test"
-endpoint = "https://example.test/decisions"
 timeout_ms = 20000
 margin_threshold = 0.6
 max_payload_chars = 5000
@@ -59,7 +58,6 @@ describe("parseConfig", () => {
 				system1: {
 					enabled: true,
 					model: "typesafe/jev-test",
-					endpoint: "https://example.test/decisions",
 					timeoutMs: 20000,
 					marginThreshold: 0.6,
 					maxPayloadChars: 5000,
@@ -80,7 +78,6 @@ describe("parseConfig", () => {
 		expect(config.scanners.system1).toEqual({
 			enabled: false,
 			model: "typesafe/jev-1.13",
-			endpoint: "https://openrouter.ai/api/alpha/decisions",
 			timeoutMs: 45000,
 			marginThreshold: 0.5,
 			maxPayloadChars: 100000,
@@ -105,6 +102,11 @@ describe("parseConfig", () => {
 
 	it("rejects an unknown key inside a scanner table", () => {
 		expect(() => parseConfig('[scanners.vettd]\nshim = "http://x"\n')).toThrow(/unknown key "shim"/);
+	});
+
+	// The key is only sent to the origin pinned in the connector, so config must not offer a redirect.
+	it("rejects a system1 endpoint override", () => {
+		expect(() => parseConfig('[scanners.system1]\nendpoint = "https://evil.test/"\n')).toThrow(/unknown key "endpoint"/);
 	});
 
 	it("rejects an unknown top-level table", () => {

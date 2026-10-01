@@ -16,7 +16,6 @@ vi.stubGlobal("fetch", mockFetch);
 const CFG: System1ScannerConfig = {
 	enabled: true,
 	model: "typesafe/jev-test",
-	endpoint: "https://example.test/decisions",
 	timeoutMs: 1000,
 	marginThreshold: 0.5,
 	maxPayloadChars: 10_000,
@@ -365,8 +364,10 @@ describe("system1 scanner", () => {
 		it("sends the model, bearer key, and every question in the first call", async () => {
 			await run();
 			const [url, init] = mockFetch.mock.calls[0];
-			expect(url).toBe(CFG.endpoint);
+			expect(url).toBe("https://openrouter.ai/api/alpha/decisions");
 			expect(init.headers.Authorization).toBe("Bearer k");
+			// A redirect would forward the bearer key to another host.
+			expect(init.redirect).toBe("error");
 			const body = bodyOfCall(0);
 			expect(Object.keys(body.questions)).toHaveLength(SYSTEM1_RULES.length);
 			expect(body.state.skill_name).toBe("demo-skill");
@@ -400,8 +401,42 @@ describe("system1 scanner", () => {
 			mockFetch.mockResolvedValueOnce({ok: false, status: 402, json: async () => ({})} as unknown as Response);
 			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
 			expect(out.run.status).toBe("errored");
-			expect(out.run.error).toContain("402");
+			expect(out.run.error).toBe("http_error 402");
 			expect(out.findings).toEqual([]);
+		});
+
+		// Persisted errors are controlled codes: an upstream or proxy message can echo a credential.
+		it("never persists raw exception text", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "sk-secret-value");
+			mockFetch.mockRejectedValueOnce(new Error("proxy said Bearer sk-secret-value"));
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			expect(out.run.error).toBe("network");
+			expect(JSON.stringify(out)).not.toContain("sk-secret-value");
+		});
+
+		// A single answered benign question must not read as "everything clean".
+		it("errors when any rule question is unanswered", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			const res = stage1Response({});
+			delete (res.answers as Record<string, unknown>).typosquatting;
+			mockJson(res);
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			expect(out.run.status).toBe("errored");
+			expect(out.run.error).toMatch(/answered \d+ of \d+/);
+			expect(out.findings).toEqual([]);
+		});
+
+		// The provider response is untrusted: free text in it must not reach the persisted rawReport.
+		it("drops unvalidated fields from the aggregate answer", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response({data_exfiltration: answer(0.97)}));
+			mockJson({
+				answers: {verdict: {type: "choice", choice: "HIGH", probabilities: {HIGH: 1}, confidence: 1, echo: "leaked-text"}},
+				usage: {cost: 0.1, note: "leaked-text"},
+			});
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			expect(JSON.stringify(out.run.rawReport)).not.toContain("leaked-text");
+			expect((out.run.rawReport as {aggregateVerdict: string}).aggregateVerdict).toBe("HIGH");
 		});
 
 		it("marks the run timeout on an aborted request", async () => {
@@ -426,7 +461,7 @@ describe("system1 scanner", () => {
 			expect(out.run.status).toBe("success");
 			expect(out.findings).toHaveLength(1);
 			expect(out.run.verdict).toBe("fail");
-			expect((out.run.rawReport as {stage2: {error: string}}).stage2.error).toContain("500");
+			expect((out.run.rawReport as {stage2: {error: string}}).stage2.error).toBe("http_error 500");
 		});
 	});
 });

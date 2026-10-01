@@ -188,7 +188,7 @@ explicit.
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
 | `scanners.system1.enabled` | `false` | System 1 typed-question scan (OpenRouter Decisions API) |
-| `scanners.system1.model` / `.endpoint` | `typesafe/jev-1.13` / OpenRouter `/api/alpha/decisions` | Model and Decisions endpoint |
+| `scanners.system1.model` | `typesafe/jev-1.13` | Model; the OpenRouter endpoint is pinned in the connector so the key cannot be redirected |
 | `scanners.system1.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
 | `scanners.system1.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
 | `scanners.system1.max_payload_chars` | `100000` | Cap on the SKILL.md + scripts text sent |

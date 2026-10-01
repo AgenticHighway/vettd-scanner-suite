@@ -10,11 +10,17 @@ import {
 	type AggregateEvidence,
 	type AggregateResult,
 	type AggregateVerdict,
+	type DecisionAnswer,
 	type DecisionConnector,
+	DecisionError,
 	type DecisionResponse,
+	type DecisionUsage,
 } from "../system1/types.js";
 
 const MODULE = "external-scanners.system1";
+
+// Pinned, not configurable: the bearer key must never be redirectable by config.
+const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 
 const VERDICT_QUESTION = (rulesChecked: number) =>
 	({
@@ -62,22 +68,79 @@ export function parseVerdict(response: DecisionResponse): AggregateVerdict | nul
 	return (AGGREGATE_VERDICTS as readonly string[]).includes(choice ?? "") ? (choice as AggregateVerdict) : null;
 }
 
+const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+// Only validated, typed fields survive: nothing the provider echoes back as free text is kept.
+function cleanUsage(usage: unknown): DecisionUsage | undefined {
+	if (typeof usage !== "object" || usage === null) return undefined;
+	const u = usage as Record<string, unknown>;
+	return {input_tokens: num(u.input_tokens), output_tokens: num(u.output_tokens), cost: num(u.cost)};
+}
+
+function cleanAnswer(answer: unknown): DecisionAnswer | null {
+	if (typeof answer !== "object" || answer === null) return null;
+	const a = answer as Record<string, unknown>;
+	const probabilities: Record<string, number> = {};
+	if (typeof a.probabilities === "object" && a.probabilities !== null) {
+		for (const [k, v] of Object.entries(a.probabilities)) {
+			const n = num(v);
+			if (n !== undefined) probabilities[k.slice(0, 64)] = n;
+		}
+	}
+	const legend: Record<string, string> = {};
+	if (typeof a.legend === "object" && a.legend !== null) {
+		for (const [k, v] of Object.entries(a.legend)) if (typeof v === "string") legend[k.slice(0, 64)] = v.slice(0, 200);
+	}
+	return {
+		...(typeof a.type === "string" ? {type: a.type.slice(0, 16)} : {}),
+		...(typeof a.choice === "string" ? {choice: a.choice.slice(0, 64)} : {}),
+		...(num(a.score) !== undefined ? {score: num(a.score)} : {}),
+		...(Object.keys(legend).length > 0 ? {legend} : {}),
+		probabilities,
+		confidence: num(a.confidence) ?? 0,
+	};
+}
+
+function cleanResponse(raw: unknown): DecisionResponse {
+	const r = raw as {model?: unknown; answers?: unknown; usage?: unknown} | null;
+	if (typeof r?.answers !== "object" || r.answers === null) throw new DecisionError("protocol");
+	const answers: Record<string, DecisionAnswer> = {};
+	for (const [key, value] of Object.entries(r.answers)) {
+		const answer = cleanAnswer(value);
+		if (answer) answers[key.slice(0, 64)] = answer;
+	}
+	return {
+		...(typeof r.model === "string" ? {model: r.model.slice(0, 100)} : {}),
+		answers,
+		...(cleanUsage(r.usage) ? {usage: cleanUsage(r.usage)} : {}),
+	};
+}
+
 async function decide(body: unknown, cfg: System1ScannerConfig, apiKey: string): Promise<DecisionResponse> {
-	const res = await fetch(cfg.endpoint, {
-		method: "POST",
-		headers: {Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json"},
-		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(cfg.timeoutMs),
-	});
+	let res: Response;
+	try {
+		res = await fetch(ENDPOINT, {
+			method: "POST",
+			headers: {Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json"},
+			body: JSON.stringify(body),
+			// A redirect would carry the Authorization header to another host.
+			redirect: "error",
+			signal: AbortSignal.timeout(cfg.timeoutMs),
+		});
+	} catch (err) {
+		throw new DecisionError(err instanceof Error && err.name === "TimeoutError" ? "timeout" : "network");
+	}
 	if (!res.ok) {
 		logger.error({module: MODULE, status: res.status}, "decision API HTTP error response");
-		throw new Error(`decision api http ${res.status}`);
+		throw new DecisionError("http_error", res.status);
 	}
-	const parsed = (await res.json()) as DecisionResponse;
-	if (typeof parsed?.answers !== "object" || parsed.answers === null) {
-		throw new Error("decision api response has no answers object");
+	let parsed: unknown;
+	try {
+		parsed = await res.json();
+	} catch {
+		throw new DecisionError("protocol");
 	}
-	return parsed;
+	return cleanResponse(parsed);
 }
 
 export function createOpenRouterConnector(cfg: System1ScannerConfig): DecisionConnector {
@@ -87,12 +150,12 @@ export function createOpenRouterConnector(cfg: System1ScannerConfig): DecisionCo
 		available: () => !!key(),
 		async askRules(skillName, payload, rules) {
 			const apiKey = key();
-			if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+			if (!apiKey) throw new DecisionError("no_key");
 			return decide(buildRulesRequest(cfg.model, skillName, payload, rules), cfg, apiKey);
 		},
 		async aggregate(skillName, evidence, rulesChecked): Promise<AggregateResult> {
 			const apiKey = key();
-			if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+			if (!apiKey) throw new DecisionError("no_key");
 			const response = await decide(buildAggregateRequest(cfg.model, skillName, evidence, rulesChecked), cfg, apiKey);
 			return {
 				verdict: parseVerdict(response),
