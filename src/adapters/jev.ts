@@ -1,354 +1,68 @@
-// JEV rule scan: a two-stage threat assessment over OpenRouter's Decisions API
-// (`typesafe/jev-1.13`). Stage 1 asks one typed question per rule (39) in a single call over the
-// skill's SKILL.md + scripts; only rules that clearly fired (probability margin, not a bare
-// plurality) go to stage 2, which asks one severity question conditioned on that curated evidence.
-//
-// Everything here except the two HTTP calls is a pure function so it can be tested without a
-// network. Design rationale: vettd docs/spikes/jev-scan-emitter.md.
+// The one literal connector: OpenRouter's Decisions API serving `typesafe/jev-1.13`. It owns the
+// wire format (typed questions in, probability distributions out) and the API key; nothing about
+// rules, trust or Vettd's output shapes lives here. See ../system1/ for the scanner.
 
-import type {JevScannerConfig} from "../config/schema.js";
-import type {
-	AssetFinding,
-	AssetSignal,
-	ScannerInput,
-	ScannerOutput,
-	SkillScanner,
-} from "../contract/scanner.js";
+import type {System1ScannerConfig} from "../config/schema.js";
 import {logger} from "../logger.js";
-import {JEV_RULES, type JevChoiceRule, type JevRule, type JevScoreRule} from "./jev-rules.js";
+import type {System1Rule} from "../system1/rules.js";
+import {
+	AGGREGATE_VERDICTS,
+	type AggregateEvidence,
+	type AggregateResult,
+	type AggregateVerdict,
+	type DecisionConnector,
+	type DecisionResponse,
+} from "../system1/types.js";
 
-const JEV_SOURCE_ID = "jev";
-const SCAN_SOURCE_CLASS = "scan";
+const MODULE = "external-scanners.system1";
 
-const VERDICT_QUESTION = {
-	type: "choice",
-	instructions:
-		"Given ONLY these confirmed rule findings (already filtered to a clear signal out of 39 checks -- not the raw skill package), what is the overall severity of the most serious concern?",
-	criteria: {
-		SAFE: "No security or policy concerns found; the skill behaves as described.",
-		LOW: "Minor issues only: missing optional metadata (e.g. allowed-tools) or minor documentation gaps.",
-		MEDIUM: "Moderate concerns: social engineering, suspicious patterns, or an actual declared tool-restriction violation.",
-		HIGH: "Serious issues: prompt injection in SKILL.md, credential theft, or tool poisoning.",
-		CRITICAL:
-			"Immediate threats: data exfiltration to an external server, command injection (eval/exec), or hardcoded credentials.",
-	},
-} as const;
-
-const VERDICTS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
-export type JevVerdict = (typeof VERDICTS)[number];
-
-// ─── Wire types ───────────────────────────────────────────────────────────────
-
-export interface JevAnswer {
-	type?: string;
-	/** Choice questions. Score questions carry `score` + `legend` instead; see normalizeAnswer. */
-	choice?: string;
-	/** Score questions: the probability-weighted expected level (a fraction, NOT an index). */
-	score?: number;
-	legend?: Record<string, string>;
-	/** Keyed by option name for choice questions, by legend index for score questions. */
-	probabilities: Record<string, number>;
-	confidence: number;
-}
-
-interface JevUsage {
-	input_tokens?: number;
-	output_tokens?: number;
-	cost?: number;
-}
-
-export interface JevResponse {
-	/** The pinned model version that actually answered (e.g. "typesafe/jev-1.13-20260917"). */
-	model?: string;
-	answers: Record<string, JevAnswer>;
-	usage?: JevUsage;
-}
-
-// ─── Payload ──────────────────────────────────────────────────────────────────
-
-const SCRIPT_EXTENSIONS = new Set([
-	"py", "js", "mjs", "cjs", "ts", "sh", "bash", "zsh", "rb", "go", "rs", "ps1", "pl", "php", "java", "lua",
-]);
-// Dependency manifests: the unpinned / provenance / typosquatting rules have nothing to read without them.
-const MANIFEST_BASENAMES = new Set([
-	"package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "Gemfile.lock",
-]);
-
-function basename(path: string): string {
-	return path.split("/").pop() ?? path;
-}
-
-function isSkillMd(path: string): boolean {
-	return basename(path).toLowerCase() === "skill.md";
-}
-
-function isPayloadFile(path: string): boolean {
-	const base = basename(path);
-	if (MANIFEST_BASENAMES.has(base)) return true;
-	const dot = base.lastIndexOf(".");
-	return dot > 0 && SCRIPT_EXTENSIONS.has(base.slice(dot + 1).toLowerCase());
-}
-
-export interface JevPayload {
-	text: string;
-	includedPaths: string[];
-	/** Eligible files dropped (or cut short) to stay under the character cap. */
-	omittedPaths: string[];
-	truncated: boolean;
-}
-
-/**
- * The text jev reads: the shallowest SKILL.md first, then scripts and dependency manifests in path
- * order, each as `### FILE: <path>`. References and assets are deliberately not sent (cost, and
- * parity with the demo). Stops at `maxChars`, cutting the file that crosses the cap.
- */
-export function buildPayload(textFiles: Map<string, string>, maxChars: number): JevPayload {
-	const skillMds = [...textFiles.keys()]
-		.filter(isSkillMd)
-		.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
-	const others = [...textFiles.keys()].filter((p) => !isSkillMd(p) && isPayloadFile(p)).sort();
-	const ordered = [...skillMds.slice(0, 1), ...others];
-
-	const sections: string[] = [];
-	const includedPaths: string[] = [];
-	const omittedPaths: string[] = [];
-	let used = 0;
-	let truncated = false;
-	for (const path of ordered) {
-		const remaining = maxChars - used;
-		if (remaining <= 0) {
-			omittedPaths.push(path);
-			truncated = true;
-			continue;
-		}
-		const header = `### FILE: ${path}\n`;
-		const content = textFiles.get(path) ?? "";
-		let section = header + content;
-		if (section.length > remaining) {
-			section = section.slice(0, remaining);
-			omittedPaths.push(path);
-			truncated = true;
-		}
-		sections.push(section);
-		includedPaths.push(path);
-		used += section.length + 2; // "\n\n" separator
-	}
-	return {text: sections.join("\n\n"), includedPaths, omittedPaths, truncated};
-}
-
-export function skillNameFromPayload(textFiles: Map<string, string>): string {
-	const skillMdPath = [...textFiles.keys()].find(isSkillMd);
-	const content = skillMdPath ? (textFiles.get(skillMdPath) ?? "") : "";
-	const match = content.match(/^---\s*\n[\s\S]*?^name:\s*["']?([^\n"']+?)["']?\s*$/m);
-	return match?.[1]?.trim() || "unknown";
-}
-
-// ─── Requests ─────────────────────────────────────────────────────────────────
-
-function questionFor(rule: JevRule): Record<string, unknown> {
-	if (rule.kind === "score") {
-		return {type: "score", instructions: rule.instructions, criteria: rule.levels};
-	}
-	return {
+const VERDICT_QUESTION = (rulesChecked: number) =>
+	({
 		type: "choice",
-		instructions: rule.instructions,
-		criteria: {none: rule.none, present: rule.present},
-	};
+		instructions: `Given ONLY these confirmed rule findings (already filtered to a clear signal out of ${rulesChecked} checks -- not the raw skill package), what is the overall severity of the most serious concern?`,
+		criteria: {
+			SAFE: "No security or policy concerns found; the skill behaves as described.",
+			LOW: "Minor issues only: missing optional metadata (e.g. allowed-tools) or minor documentation gaps.",
+			MEDIUM: "Moderate concerns: social engineering, suspicious patterns, or an actual declared tool-restriction violation.",
+			HIGH: "Serious issues: prompt injection in SKILL.md, credential theft, or tool poisoning.",
+			CRITICAL:
+				"Immediate threats: data exfiltration to an external server, command injection (eval/exec), or hardcoded credentials.",
+		},
+	}) as const;
+
+function questionFor(rule: System1Rule): Record<string, unknown> {
+	if (rule.kind === "score") return {type: "score", instructions: rule.instructions, criteria: rule.levels};
+	if (rule.kind === "classification") return {type: "choice", instructions: rule.instructions, criteria: rule.options};
+	return {type: "choice", instructions: rule.instructions, criteria: {none: rule.none, present: rule.present}};
 }
 
-export function buildStage1Request(model: string, skillName: string, payload: string): unknown {
+export function buildRulesRequest(model: string, skillName: string, payload: string, rules: readonly System1Rule[]): unknown {
 	return {
 		model,
 		state: {skill_name: skillName, skill_payload: payload},
-		questions: Object.fromEntries(JEV_RULES.map((rule) => [rule.key, questionFor(rule)])),
+		questions: Object.fromEntries(rules.map((rule) => [rule.key, questionFor(rule)])),
 	};
 }
 
-// ─── Stage-1 evaluation ───────────────────────────────────────────────────────
-
-export interface RuleEvaluation {
-	rule: JevRule;
-	choice: string;
-	probabilities: Record<string, number>;
-	confidence: number;
-	/** Non-"none" probability mass minus "none" mass; positive means the rule leans fired. */
-	margin: number;
-	fired: boolean;
-	/** For score rules, the winning non-"none" level; "present" for choice rules. */
-	level: string;
-}
-
-/**
- * Choice answers arrive as `{choice, probabilities: {none, present}}`. Score answers do not: the
- * live API returns `{score, legend: {"0":"none","1":"mild","2":"strong"}, probabilities: {"0":..}}`
- * (observed against jev-1.13; the public demo only shows the choice form). `score` is the
- * probability-weighted expected level, not an index (0.02 when 98% of the mass is on "none"), so
- * the chosen level is the legend entry with the most probability. Both forms are folded into the
- * choice form so the margin logic has one shape to read. Returns null when the answer is unusable.
- */
-export function normalizeAnswer(answer: JevAnswer): {choice: string; probabilities: Record<string, number>} | null {
-	if (typeof answer.choice === "string") return {choice: answer.choice, probabilities: answer.probabilities ?? {}};
-	const legend = answer.legend;
-	if (!legend) return null;
-	const probabilities: Record<string, number> = {};
-	let best: {label: string; p: number} | null = null;
-	for (const [index, p] of Object.entries(answer.probabilities ?? {})) {
-		const label = legend[index];
-		if (typeof label !== "string" || typeof p !== "number") continue;
-		probabilities[label] = p;
-		if (!best || p > best.p) best = {label, p};
-	}
-	return best ? {choice: best.label, probabilities} : null;
-}
-
-function evaluateRule(
-	rule: JevRule,
-	answer: JevAnswer,
-	normalized: {choice: string; probabilities: Record<string, number>},
-	marginThreshold: number,
-): RuleEvaluation {
-	const probs = normalized.probabilities;
-	const pNone = probs.none ?? 0;
-	const firedEntries = Object.entries(probs).filter(([option]) => option !== "none");
-	const firedMass = firedEntries.reduce((sum, [, p]) => sum + p, 0);
-	const margin = firedMass - pNone;
-	const top = firedEntries.sort((a, b) => b[1] - a[1])[0];
-	const level = top?.[0] ?? "present";
-	// `choice` must agree with the margin: jev picking "none" never fires, whatever the residue.
-	const fired = normalized.choice !== "none" && margin >= marginThreshold;
-	return {
-		rule,
-		choice: normalized.choice,
-		probabilities: probs,
-		confidence: answer.confidence,
-		margin,
-		fired,
-		level,
-	};
-}
-
-export interface Stage1Evaluation {
-	evaluations: RuleEvaluation[];
-	/** Rule keys with no answer in the response; never counted as fired. */
-	unanswered: string[];
-}
-
-export function evaluateStage1(response: JevResponse, marginThreshold: number): Stage1Evaluation {
-	const evaluations: RuleEvaluation[] = [];
-	const unanswered: string[] = [];
-	for (const rule of JEV_RULES) {
-		const answer = response.answers?.[rule.key];
-		const normalized = answer ? normalizeAnswer(answer) : null;
-		if (!answer || !normalized) {
-			unanswered.push(rule.key);
-			continue;
-		}
-		evaluations.push(evaluateRule(rule, answer, normalized, marginThreshold));
-	}
-	return {evaluations, unanswered};
-}
-
-// ─── Stage 2 ──────────────────────────────────────────────────────────────────
-
-/** Rule's finding phrase: the criteria sentence minus its "The skill package contains " lead-in. */
-function findingText(rule: JevRule): string {
-	if (rule.kind === "score") return rule.instructions;
-	return rule.present.replace(/^The skill package contains /, "").replace(/\.$/, "");
-}
-
-export function buildStage2Request(model: string, skillName: string, fired: RuleEvaluation[]): unknown {
+export function buildAggregateRequest(model: string, skillName: string, evidence: AggregateEvidence[], rulesChecked: number): unknown {
 	return {
 		model,
 		state: {
 			skill_name: skillName,
-			confirmed_findings: fired.map((e) => ({
-				rule: e.rule.key,
-				section: e.rule.section,
-				finding: findingText(e.rule),
-			})),
-			rules_checked: JEV_RULES.length,
-			rules_fired: fired.length,
+			confirmed_findings: evidence,
+			rules_checked: rulesChecked,
+			rules_fired: evidence.length,
 		},
-		questions: {verdict: VERDICT_QUESTION},
+		questions: {verdict: VERDICT_QUESTION(rulesChecked)},
 	};
 }
 
-export function parseVerdict(response: JevResponse): JevVerdict | null {
+export function parseVerdict(response: DecisionResponse): AggregateVerdict | null {
 	const choice = response.answers?.verdict?.choice;
-	return (VERDICTS as readonly string[]).includes(choice ?? "") ? (choice as JevVerdict) : null;
+	return (AGGREGATE_VERDICTS as readonly string[]).includes(choice ?? "") ? (choice as AggregateVerdict) : null;
 }
 
-/** JEV's five-step scale onto the suite's run verdict: LOW and MEDIUM are warn-worthy, HIGH and CRITICAL fail. */
-export function runVerdictFor(verdict: JevVerdict): "pass" | "warn" | "fail" {
-	if (verdict === "SAFE") return "pass";
-	if (verdict === "LOW" || verdict === "MEDIUM") return "warn";
-	return "fail";
-}
-
-function verdictFromSeverities(severities: string[]): "pass" | "warn" | "fail" {
-	if (severities.some((s) => s === "critical" || s === "high")) return "fail";
-	if (severities.some((s) => s === "medium" || s === "low")) return "warn";
-	return "pass";
-}
-
-// ─── Mapping to findings and signals ──────────────────────────────────────────
-
-function severityFor(rule: JevRule, level: string): AssetFinding["severity"] {
-	return rule.kind === "score"
-		? ((rule as JevScoreRule).severityByLevel[level] ?? "low")
-		: (rule as JevChoiceRule).severity;
-}
-
-// The number lives on the row's `confidence` facet, not in the prose: detail stays one
-// short human sentence, and the margin remains recoverable from run.rawReport.
-function detailFor(e: RuleEvaluation): string {
-	return `${e.rule.summary}.`;
-}
-
-export function mapFired(
-	fired: RuleEvaluation[],
-	model: string,
-	observedAt: string,
-): {findings: AssetFinding[]; signals: AssetSignal[]} {
-	const findings: AssetFinding[] = [];
-	const signals: AssetSignal[] = [];
-	for (const e of fired) {
-		const severity = severityFor(e.rule, e.level);
-		const label = `JEV: ${e.rule.key.replace(/_/g, " ")}`;
-		const detail = detailFor(e);
-		if (e.rule.route.type === "signal") {
-			signals.push({
-				dataCategory: e.rule.route.dataCategory,
-				sourceClass: SCAN_SOURCE_CLASS,
-				ruleId: e.rule.route.ruleId,
-				observedAt,
-				source: JEV_SOURCE_ID,
-				severity,
-				label,
-				detail,
-				derivation: "inferred",
-				confidence: e.confidence,
-				method: model,
-			});
-		} else {
-			findings.push({
-				category: "security",
-				label,
-				detail,
-				severity,
-				source: JEV_SOURCE_ID,
-				ruleId: e.rule.key,
-				derivation: "inferred",
-				confidence: e.confidence,
-			});
-		}
-	}
-	return {findings, signals};
-}
-
-// ─── HTTP ─────────────────────────────────────────────────────────────────────
-
-async function decide(body: unknown, cfg: JevScannerConfig, apiKey: string): Promise<JevResponse> {
+async function decide(body: unknown, cfg: System1ScannerConfig, apiKey: string): Promise<DecisionResponse> {
 	const res = await fetch(cfg.endpoint, {
 		method: "POST",
 		headers: {Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json"},
@@ -356,140 +70,35 @@ async function decide(body: unknown, cfg: JevScannerConfig, apiKey: string): Pro
 		signal: AbortSignal.timeout(cfg.timeoutMs),
 	});
 	if (!res.ok) {
-		logger.error({module: "external-scanners.jev", scannerId: JEV_SOURCE_ID, status: res.status}, "JEV HTTP error response");
-		throw new Error(`jev http ${res.status}`);
+		logger.error({module: MODULE, status: res.status}, "decision API HTTP error response");
+		throw new Error(`decision api http ${res.status}`);
 	}
-	const parsed = (await res.json()) as JevResponse;
+	const parsed = (await res.json()) as DecisionResponse;
 	if (typeof parsed?.answers !== "object" || parsed.answers === null) {
-		throw new Error("jev response has no answers object");
+		throw new Error("decision api response has no answers object");
 	}
 	return parsed;
 }
 
-// ─── SkillScanner ─────────────────────────────────────────────────────────────
-
-function emptyRun(status: string, startedAt: number, scannedAt: Date, error?: string): ScannerOutput {
+export function createOpenRouterConnector(cfg: System1ScannerConfig): DecisionConnector {
+	const key = () => process.env.OPENROUTER_API_KEY;
 	return {
-		findings: [],
-		run: {
-			source: JEV_SOURCE_ID,
-			status,
-			findingCount: 0,
-			criticalCount: 0,
-			highCount: 0,
-			...(error ? {error} : {}),
-			durationMs: Date.now() - startedAt,
-			scannedAt,
+		model: cfg.model,
+		available: () => !!key(),
+		async askRules(skillName, payload, rules) {
+			const apiKey = key();
+			if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+			return decide(buildRulesRequest(cfg.model, skillName, payload, rules), cfg, apiKey);
 		},
-	};
-}
-
-export function createJevScanner(cfg: JevScannerConfig): SkillScanner {
-	return {
-		id: JEV_SOURCE_ID,
-
-		async available(): Promise<boolean> {
-			return !!process.env.OPENROUTER_API_KEY;
-		},
-
-		async scan(input: ScannerInput): Promise<ScannerOutput> {
-			const startedAt = Date.now();
-			const scannedAt = new Date();
-			const apiKey = process.env.OPENROUTER_API_KEY;
-			if (!apiKey) return emptyRun("skipped", startedAt, scannedAt, "OPENROUTER_API_KEY is not set");
-
-			const payload = buildPayload(input.textFiles, cfg.maxPayloadChars);
-			if (payload.includedPaths.length === 0) {
-				return emptyRun("skipped", startedAt, scannedAt, "no SKILL.md or scripts to analyze");
-			}
-			const skillName = skillNameFromPayload(input.textFiles);
-			logger.info({module: "external-scanners.jev", scannerId: JEV_SOURCE_ID, payloadChars: payload.text.length, truncated: payload.truncated}, "jev scanner run started");
-
-			let stage1Response: JevResponse;
-			try {
-				stage1Response = await decide(buildStage1Request(cfg.model, skillName, payload.text), cfg, apiKey);
-			} catch (err) {
-				const isTimeout = err instanceof Error && err.name === "TimeoutError";
-				logger.error({module: "external-scanners.jev", scannerId: JEV_SOURCE_ID, err}, "jev rule scan failed");
-				return emptyRun(isTimeout ? "timeout" : "errored", startedAt, scannedAt, err instanceof Error ? err.message : String(err));
-			}
-
-			const {evaluations, unanswered} = evaluateStage1(stage1Response, cfg.marginThreshold);
-			if (evaluations.length === 0) {
-				return emptyRun("errored", startedAt, scannedAt, "jev answered none of the rule questions");
-			}
-			const fired = evaluations.filter((e) => e.fired);
-			const {findings, signals} = mapFired(fired, cfg.model, scannedAt.toISOString());
-
-			// Stage 2 only earns its call when something fired; zero fired is SAFE by construction.
-			let verdict: JevVerdict | null = fired.length === 0 ? "SAFE" : null;
-			let stage2: Record<string, unknown> = {skipped: fired.length === 0};
-			let stage2Cost = 0;
-			if (fired.length > 0) {
-				try {
-					const stage2Response = await decide(buildStage2Request(cfg.model, skillName, fired), cfg, apiKey);
-					verdict = parseVerdict(stage2Response);
-					stage2Cost = stage2Response.usage?.cost ?? 0;
-					stage2 = {answer: stage2Response.answers.verdict ?? null, usage: stage2Response.usage ?? null};
-					if (!verdict) stage2.error = "unrecognized verdict choice";
-				} catch (err) {
-					stage2 = {error: err instanceof Error ? err.message : String(err)};
-					logger.warn({module: "external-scanners.jev", scannerId: JEV_SOURCE_ID, err}, "jev aggregate call failed; deriving verdict from findings");
-				}
-			}
-			const runVerdict = verdict
-				? runVerdictFor(verdict)
-				: verdictFromSeverities([...findings, ...signals].map((f) => f.severity ?? "info"));
-
-			const duration = Date.now() - startedAt;
-			logger.info({module: "external-scanners.jev", scannerId: JEV_SOURCE_ID, status: "success", duration_ms: duration, fired: fired.length}, "jev scanner run completed");
-
+		async aggregate(skillName, evidence, rulesChecked): Promise<AggregateResult> {
+			const apiKey = key();
+			if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+			const response = await decide(buildAggregateRequest(cfg.model, skillName, evidence, rulesChecked), cfg, apiKey);
 			return {
-				findings,
-				...(signals.length > 0 ? {signals} : {}),
-				run: {
-					source: JEV_SOURCE_ID,
-					version: stage1Response.model ?? cfg.model,
-					status: "success",
-					verdict: runVerdict,
-					findingCount: findings.length,
-					criticalCount: findings.filter((f) => f.severity === "critical").length,
-					highCount: findings.filter((f) => f.severity === "high").length,
-					// Every answer, fired or not, with its probabilities: the material for agreement and
-					// false-positive analysis against the other scanners, without a schema change.
-					rawReport: {
-						model: cfg.model,
-						modelVersion: stage1Response.model ?? null,
-						marginThreshold: cfg.marginThreshold,
-						jevVerdict: verdict,
-						payload: {
-							chars: payload.text.length,
-							includedPaths: payload.includedPaths,
-							omittedPaths: payload.omittedPaths,
-							truncated: payload.truncated,
-						},
-						stage1: {
-							usage: stage1Response.usage ?? null,
-							unanswered,
-							answers: Object.fromEntries(
-								evaluations.map((e) => [
-									e.rule.key,
-									{
-										choice: e.choice,
-										probabilities: e.probabilities,
-										confidence: e.confidence,
-										margin: e.margin,
-										fired: e.fired,
-									},
-								]),
-							),
-						},
-						stage2,
-						totalCost: (stage1Response.usage?.cost ?? 0) + stage2Cost,
-					},
-					durationMs: duration,
-					scannedAt,
-				},
+				verdict: parseVerdict(response),
+				answer: response.answers.verdict ?? null,
+				usage: response.usage ?? null,
+				cost: response.usage?.cost ?? 0,
 			};
 		},
 	};

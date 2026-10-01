@@ -30,7 +30,7 @@ queue_depth = 10
 enabled = true
 timeout_ms = 15000
 
-[scanners.jev]
+[scanners.system1]
 enabled = true
 model = "typesafe/jev-test"
 endpoint = "https://example.test/decisions"
@@ -56,7 +56,7 @@ describe("parseConfig", () => {
 					queueDepth: 10,
 				},
 				socket: {enabled: true, timeoutMs: 15000},
-				jev: {
+				system1: {
 					enabled: true,
 					model: "typesafe/jev-test",
 					endpoint: "https://example.test/decisions",
@@ -77,7 +77,7 @@ describe("parseConfig", () => {
 		expect(config.scanners.cisco.concurrency).toBe(1);
 		expect(config.scanners.cisco.queueDepth).toBe(50);
 		expect(config.scanners.socket.timeoutMs).toBe(30000);
-		expect(config.scanners.jev).toEqual({
+		expect(config.scanners.system1).toEqual({
 			enabled: false,
 			model: "typesafe/jev-1.13",
 			endpoint: "https://openrouter.ai/api/alpha/decisions",
@@ -93,7 +93,7 @@ describe("parseConfig", () => {
 		expect(config.scanners.vettd.enabled).toBe(false);
 		expect(config.scanners.cisco.enabled).toBe(false);
 		expect(config.scanners.socket.enabled).toBe(false);
-		expect(config.scanners.jev.enabled).toBe(false);
+		expect(config.scanners.system1.enabled).toBe(false);
 	});
 
 	// Typo protection: [scanners.vetd] must be an error, not a silently
@@ -136,8 +136,8 @@ describe("parseConfig", () => {
 
 	it("rejects a non-boolean enabled", () => {
 		expect(() => parseConfig('[scanners.socket]\nenabled = "yes"\n')).toThrow(/must be a boolean/);
-		expect(() => parseConfig("[scanners.jev]\nmargin_threshold = 1.5\n")).toThrow(/between 0 and 1/);
-		expect(() => parseConfig("[scanners.jev]\nmodle = 'x'\n")).toThrow(/unknown key "modle"/);
+		expect(() => parseConfig("[scanners.system1]\nmargin_threshold = 1.5\n")).toThrow(/between 0 and 1/);
+		expect(() => parseConfig("[scanners.system1]\nmodle = 'x'\n")).toThrow(/unknown key "modle"/);
 	});
 
 	it("rejects invalid TOML syntax", () => {
