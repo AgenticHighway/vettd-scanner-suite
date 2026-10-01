@@ -17,8 +17,8 @@ client ── POST /scans (JSON) ───────────────�
       ┌─────────────┼──────────────────┐
       ▼             ▼                  ▼
  vettd adapter  cisco adapter     socket adapter        ← adapters/ (TS, in-repo)
-      │             │                  │                (jev adapter: same shape as socket,
-      ▼             ▼                  ▼                 talks to OpenRouter directly)
+      │             │                  │                (system1 scanner: typed-question model,
+      ▼             ▼                  ▼                 reached via the OpenRouter connector)
  Rust http-shim  Python shim      api.socket.dev        ← transports
  (scanner repo)  (shims/cisco)    (external SaaS)
 ```
@@ -187,16 +187,16 @@ explicit.
 | `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
-| `scanners.jev.enabled` | `false` | JEV rule scan (OpenRouter Decisions API); experimental, advisory in vettd |
-| `scanners.jev.model` / `.endpoint` | `typesafe/jev-1.13` / OpenRouter `/api/alpha/decisions` | Model and Decisions endpoint |
-| `scanners.jev.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
-| `scanners.jev.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
-| `scanners.jev.max_payload_chars` | `100000` | Cap on the SKILL.md + scripts text sent |
+| `scanners.system1.enabled` | `false` | System 1 typed-question scan (OpenRouter Decisions API) |
+| `scanners.system1.model` | `typesafe/jev-1.13` | Model; the OpenRouter endpoint is pinned in the connector so the key cannot be redirected |
+| `scanners.system1.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
+| `scanners.system1.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
+| `scanners.system1.max_payload_chars` | `100000` | Cap on the SKILL.md + scripts text sent |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 
 - `SOCKET_API_KEY`, `OPENROUTER_API_KEY` — secrets; secrets never go in the config file or git.
-  A missing `OPENROUTER_API_KEY` makes the jev run `skipped`, not failed.
+  A missing `OPENROUTER_API_KEY` makes the system1 run `skipped`, not failed.
 - `LOG_LEVEL`, `LOG_PRETTY` — operator log plumbing, not scanner config.
 - `VETTD_SHIM_PORT`, `CISCO_SHIM_PORT` — belong to the shim *processes*; the
   suite only knows the URLs its adapters dial.
@@ -346,8 +346,9 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
   local/dev. Shim URLs in the prod config point at `127.0.0.1`, not compose
   service names.
 - **Task definition**: family `vettd-scanner-suite`, `0.5 vCPU / 2 GB`,
-  `arm64`, no task role (the suite makes no AWS API calls and carries no
-  secrets). Three containers — `suite` (port 8080; the only one with a
+  `arm64`, no task role (the suite makes no AWS API calls). The only secret is
+  `OPENROUTER_API_KEY`, delivered as a task-definition `secrets` entry
+  from Secrets Manager (see vettd `docs/infrastructure.md`). Three containers — `suite` (port 8080; the only one with a
   Service Connect port mapping, since `vettd-skill-shim`/`cisco-skill-shim`
   are only ever reached over loopback, never published). Execution role
   reuses `vettd`'s existing `vettd-ecs-execution-role`.

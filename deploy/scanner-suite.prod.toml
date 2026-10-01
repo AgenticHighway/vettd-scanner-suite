@@ -35,3 +35,12 @@ scan_timeout_ms = 30000
 # any effect — that lives in the task definition, not this file.
 concurrency = 2
 queue_depth = 50
+
+[scanners.system1]
+# Needs OPENROUTER_API_KEY on the suite container (Secrets Manager `secrets` entry in the task
+# definition; see vettd docs/infrastructure.md). Without it the run is skipped, not failed.
+enabled = true
+model = "typesafe/jev-1.13"
+timeout_ms = 45000
+margin_threshold = 0.5
+max_payload_chars = 100000

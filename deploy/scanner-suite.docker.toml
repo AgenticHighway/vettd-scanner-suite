@@ -36,9 +36,8 @@ scan_timeout_ms = 30000
 concurrency = 1
 queue_depth = 50
 
-[scanners.jev]
-# Enabled for local E2E; the run is skipped (not failed) when OPENROUTER_API_KEY is not passed to
-# the suite container. Deliberately absent from scanner-suite.prod.toml.
+[scanners.system1]
+# The run is skipped (not failed) when OPENROUTER_API_KEY is not passed to the suite container.
 enabled = true
 model = "typesafe/jev-1.13"
 timeout_ms = 45000

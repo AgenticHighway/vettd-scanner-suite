@@ -30,10 +30,9 @@ queue_depth = 10
 enabled = true
 timeout_ms = 15000
 
-[scanners.jev]
+[scanners.system1]
 enabled = true
 model = "typesafe/jev-test"
-endpoint = "https://example.test/decisions"
 timeout_ms = 20000
 margin_threshold = 0.6
 max_payload_chars = 5000
@@ -56,10 +55,9 @@ describe("parseConfig", () => {
 					queueDepth: 10,
 				},
 				socket: {enabled: true, timeoutMs: 15000},
-				jev: {
+				system1: {
 					enabled: true,
 					model: "typesafe/jev-test",
-					endpoint: "https://example.test/decisions",
 					timeoutMs: 20000,
 					marginThreshold: 0.6,
 					maxPayloadChars: 5000,
@@ -77,10 +75,9 @@ describe("parseConfig", () => {
 		expect(config.scanners.cisco.concurrency).toBe(1);
 		expect(config.scanners.cisco.queueDepth).toBe(50);
 		expect(config.scanners.socket.timeoutMs).toBe(30000);
-		expect(config.scanners.jev).toEqual({
+		expect(config.scanners.system1).toEqual({
 			enabled: false,
 			model: "typesafe/jev-1.13",
-			endpoint: "https://openrouter.ai/api/alpha/decisions",
 			timeoutMs: 45000,
 			marginThreshold: 0.5,
 			maxPayloadChars: 100000,
@@ -93,7 +90,7 @@ describe("parseConfig", () => {
 		expect(config.scanners.vettd.enabled).toBe(false);
 		expect(config.scanners.cisco.enabled).toBe(false);
 		expect(config.scanners.socket.enabled).toBe(false);
-		expect(config.scanners.jev.enabled).toBe(false);
+		expect(config.scanners.system1.enabled).toBe(false);
 	});
 
 	// Typo protection: [scanners.vetd] must be an error, not a silently
@@ -105,6 +102,11 @@ describe("parseConfig", () => {
 
 	it("rejects an unknown key inside a scanner table", () => {
 		expect(() => parseConfig('[scanners.vettd]\nshim = "http://x"\n')).toThrow(/unknown key "shim"/);
+	});
+
+	// The key is only sent to the origin pinned in the connector, so config must not offer a redirect.
+	it("rejects a system1 endpoint override", () => {
+		expect(() => parseConfig('[scanners.system1]\nendpoint = "https://evil.test/"\n')).toThrow(/unknown key "endpoint"/);
 	});
 
 	it("rejects an unknown top-level table", () => {
@@ -136,8 +138,8 @@ describe("parseConfig", () => {
 
 	it("rejects a non-boolean enabled", () => {
 		expect(() => parseConfig('[scanners.socket]\nenabled = "yes"\n')).toThrow(/must be a boolean/);
-		expect(() => parseConfig("[scanners.jev]\nmargin_threshold = 1.5\n")).toThrow(/between 0 and 1/);
-		expect(() => parseConfig("[scanners.jev]\nmodle = 'x'\n")).toThrow(/unknown key "modle"/);
+		expect(() => parseConfig("[scanners.system1]\nmargin_threshold = 1.5\n")).toThrow(/between 0 and 1/);
+		expect(() => parseConfig("[scanners.system1]\nmodle = 'x'\n")).toThrow(/unknown key "modle"/);
 	});
 
 	it("rejects invalid TOML syntax", () => {

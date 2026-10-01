@@ -15,12 +15,11 @@ export const DEFAULT_HEALTH_TIMEOUT_MS = 2_000;
 export const DEFAULT_SCAN_TIMEOUT_MS = 30_000;
 export const DEFAULT_CISCO_QUEUE_DEPTH = 50;
 export const DEFAULT_SOCKET_TIMEOUT_MS = 30_000;
-export const DEFAULT_JEV_MODEL = "typesafe/jev-1.13";
-export const DEFAULT_JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
+export const DEFAULT_SYSTEM1_MODEL = "typesafe/jev-1.13";
 // Per call (rule scan, then aggregate), so a full run stays inside jobs.scannerTimeoutMs.
-export const DEFAULT_JEV_TIMEOUT_MS = 45_000;
-export const DEFAULT_JEV_MARGIN_THRESHOLD = 0.5;
-export const DEFAULT_JEV_MAX_PAYLOAD_CHARS = 100_000;
+export const DEFAULT_SYSTEM1_TIMEOUT_MS = 45_000;
+export const DEFAULT_SYSTEM1_MARGIN_THRESHOLD = 0.5;
+export const DEFAULT_SYSTEM1_MAX_PAYLOAD_CHARS = 100_000;
 
 export interface ServerConfig {
 	host: string;
@@ -60,13 +59,13 @@ export interface SocketScannerConfig {
 }
 
 /**
- * JEV rule scan via OpenRouter's Decisions API — external SaaS, no shim; OPENROUTER_API_KEY comes
- * from the environment.
+ * System 1: typed-question decision model, served by OpenRouter's Decisions API (external SaaS, no
+ * shim). OPENROUTER_API_KEY comes from the environment. The endpoint is deliberately not
+ * configurable: the key is only ever sent to the origin pinned in the connector.
  */
-export interface JevScannerConfig {
+export interface System1ScannerConfig {
 	enabled: boolean;
 	model: string;
-	endpoint: string;
 	/** Per HTTP call. */
 	timeoutMs: number;
 	/**
@@ -85,6 +84,6 @@ export interface SuiteConfig {
 		vettd: ShimScannerConfig;
 		cisco: CiscoScannerConfig;
 		socket: SocketScannerConfig;
-		jev: JevScannerConfig;
+		system1: System1ScannerConfig;
 	};
 }
