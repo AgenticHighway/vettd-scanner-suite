@@ -1,15 +1,22 @@
 // First-party skill scanner adapter. Talks to the Rust vettd-skill-scanner
 // via its HTTP shim (the http-shim crate in that repo): GET /health and
-// POST /scan {textFiles, allPaths} → {findings, structural flags, version}.
+// POST /scan {textFiles, allPaths, bundlePath?, repoPaths?} → {findings,
+// structural flags, version}. bundlePath/repoPaths are optional (vettd#1011
+// follow-up): omitted for a caller with no repository concept, forwarded
+// as-is otherwise so the shim can resolve internal references against the
+// wider repository, not just the skill's own subtree.
 
 import type {ShimScannerConfig} from "../config/schema.js";
-import type {AssetFinding, AssetSignal, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
+import type {AssetCoverageEntry, AssetFinding, AssetSignal, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
 
 const VETTD_SOURCE_ID = "vettd";
 
 interface VettdShimResponse {
 	findings: AssetFinding[];
 	signals?: AssetSignal[];
+	// Coverage/attestation facts (vettd#941). The Rust shim omits this key when
+	// the run produced none, so it is undefined (never []) for a clean run.
+	coverage?: AssetCoverageEntry[];
 	hasSkillMd: boolean;
 	hasScripts: boolean;
 	hasReferences: boolean;
@@ -62,6 +69,8 @@ export function createVettdScanner(cfg: ShimScannerConfig): SkillScanner {
 					body: JSON.stringify({
 						textFiles: Object.fromEntries(input.textFiles),
 						allPaths: input.allPaths,
+						...(input.bundlePath !== undefined ? {bundlePath: input.bundlePath} : {}),
+						...(input.repoPaths !== undefined ? {repoPaths: input.repoPaths} : {}),
 					}),
 					signal: AbortSignal.timeout(cfg.scanTimeoutMs),
 				});
@@ -94,6 +103,10 @@ export function createVettdScanner(cfg: ShimScannerConfig): SkillScanner {
 			return {
 				findings,
 				signals: body.signals,
+				// Forward coverage on its own channel, unmodified — the engine's
+				// values are the consumer's to persist, not the adapter's to
+				// transform (mirrors how `signals` rides through untouched).
+				coverage: body.coverage,
 				run: {
 					source: VETTD_SOURCE_ID,
 					version: String(body.scannerVersion),

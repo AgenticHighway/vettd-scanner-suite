@@ -66,6 +66,18 @@ convention; vettd web's retired `vettd-scanner.ts` hardcoded
 `Date` fields (`scannedAt`, job timestamps) serialize as ISO-8601 strings over
 HTTP.
 
+`ScannerOutput` carries a third, additive first-party channel: `coverage`
+(`AssetCoverageEntry[]`, `src/contract/asset-coverage.ts`). Coverage/attestation
+facts describe the *analysis*, not the asset, so they travel separately from
+`findings` and `signals` and are stored on the audit record rather than
+persisted as a finding or signal (vettd#941). The Rust http-shim emits them
+under the `coverage` key and omits that key entirely when the run produced
+none, so the adapter forwards `body.coverage` verbatim and a zero-coverage run
+emits no `coverage` key — keeping the response byte-identical to today. The
+vettd writer persists this array onto `SkillAudit.coverage`; the wire shape
+(`kind`, `ruleId`, `label`, `detail`, optional `category`) is the same open
+contract vettd web already reads in `projectCoverage`.
+
 ## Job lifecycle
 
 ```
