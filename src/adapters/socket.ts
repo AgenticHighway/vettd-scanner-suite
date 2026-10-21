@@ -1,4 +1,5 @@
 import type {SocketScannerConfig} from "../config/schema.js";
+import type {AssetCoverageEntry} from "../contract/asset-coverage.js";
 import type {AssetFinding, ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
 import {logger} from "../logger.js";
 
@@ -274,9 +275,22 @@ async function querySocket(purls: string[], apiKey: string, cfg: SocketScannerCo
 
 // ─── Skipped output helper ────────────────────────────────────────────────────
 
-function skippedOutput(reason?: string): ScannerOutput {
+// Shown when an asset has dependencies but the caller did not permit sending them to Socket,
+// so a clean result is never mistaken for "checked and found nothing".
+function lookupsNotPermittedCoverage(dependencyCount: number): AssetCoverageEntry {
+	return {
+		kind: "coverage",
+		ruleId: "security/socket-lookups-not-permitted",
+		label: "Dependencies not checked by Socket",
+		detail: `${dependencyCount} dependencies found; third-party lookups are not permitted for this asset.`,
+		category: "security",
+	};
+}
+
+function skippedOutput(reason?: string, coverage?: AssetCoverageEntry[]): ScannerOutput {
 	return {
 		findings: [],
+		...(coverage ? {coverage} : {}),
 		run: {
 			source: SOCKET_SOURCE_ID,
 			status: "skipped",
@@ -305,6 +319,9 @@ export function createSocketScanner(cfg: SocketScannerConfig): SkillScanner {
 
 			const purls = extractPurls(input.textFiles);
 			if (purls.length === 0) return skippedOutput();
+			if (input.allowThirdPartyLookups !== true) {
+				return skippedOutput(undefined, [lookupsNotPermittedCoverage(purls.length)]);
+			}
 
 			const startedAt = Date.now();
 			const scannedAt = new Date();

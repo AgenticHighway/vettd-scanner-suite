@@ -10,10 +10,11 @@ vi.stubGlobal("fetch", mockFetch);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeInput(files: Record<string, string> = {}): ScannerInput {
+function makeInput(files: Record<string, string> = {}, allowThirdPartyLookups: boolean | undefined = true): ScannerInput {
 	return {
 		textFiles: new Map(Object.entries(files)),
 		allPaths: Object.keys(files),
+		allowThirdPartyLookups,
 	};
 }
 
@@ -232,6 +233,33 @@ describe("socketScanner", () => {
 
 			expect(result.run.status).toBe("skipped");
 			expect(mockFetch).not.toHaveBeenCalled();
+		});
+	});
+
+	// vettd#1168: private assets are opt-in. Absent must mean "not allowed" so an older caller
+	// that never sends the flag cannot leak dependencies, and the skip must be visible as
+	// coverage so a clean result is not read as "checked, nothing found".
+	describe("scan() — third-party lookup permission", () => {
+		const pkgJson = {"package.json": JSON.stringify({dependencies: {lodash: "4.17.4"}})};
+
+		it.each([undefined, false])("does not call Socket when allowThirdPartyLookups is %s", async (allow) => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const input = {...makeInput(pkgJson), allowThirdPartyLookups: allow};
+			const result = await getScanner().scan(input);
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(result.run.status).toBe("skipped");
+			expect(result.coverage).toEqual([
+				expect.objectContaining({kind: "coverage", ruleId: "security/socket-lookups-not-permitted"}),
+			]);
+		});
+
+		it("emits no coverage notice when the asset has no dependencies", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const result = await getScanner().scan(makeInput({"SKILL.md": "# hi"}, false));
+
+			expect(result.run.status).toBe("skipped");
+			expect(result.coverage).toBeUndefined();
 		});
 	});
 

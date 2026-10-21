@@ -139,6 +139,34 @@ describe("POST /scans", () => {
 		);
 	});
 
+	// vettd#1168: the caller's egress decision must reach the adapter intact, or Socket would
+	// either leak a private asset's dependencies or silently never run.
+	it("forwards allowThirdPartyLookups to the scanner", async () => {
+		const scan = vi.fn().mockResolvedValue(fakeOutput("fake"));
+		const {app} = makeApp({scanners: [{id: "fake", available: async () => true, scan}]});
+		const res = await app.inject({
+			method: "POST",
+			url: "/scans",
+			payload: JSON.stringify({...sampleBody, allowThirdPartyLookups: true}),
+			headers: {"content-type": "application/json"},
+		});
+		expect(res.statusCode).toBe(202);
+		expect(scan).toHaveBeenCalledWith(expect.objectContaining({allowThirdPartyLookups: true}));
+	});
+
+	// A string "false" is truthy; accepting it would turn a refusal into permission.
+	it("responds 400 when allowThirdPartyLookups is not a boolean", async () => {
+		const {app} = makeApp();
+		const res = await app.inject({
+			method: "POST",
+			url: "/scans",
+			payload: JSON.stringify({...sampleBody, allowThirdPartyLookups: "false"}),
+			headers: {"content-type": "application/json"},
+		});
+		expect(res.statusCode).toBe(400);
+		expect((res.json() as {error: string}).error).toContain("allowThirdPartyLookups");
+	});
+
 	it("responds 400 when bundlePath is not a string", async () => {
 		const {app} = makeApp();
 		const res = await app.inject({

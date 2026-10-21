@@ -28,6 +28,12 @@ export interface ScannerInput {
 	 * skills draw from). Absent when the caller has no repository concept.
 	 */
 	repoPaths?: string[];
+	/**
+	 * Whether this asset's dependency identities (package name + version) may be sent to a
+	 * third-party lookup service such as Socket (vettd#1168). The caller decides from asset
+	 * visibility and tenant settings; absent means NOT allowed, so an older caller never egresses.
+	 */
+	allowThirdPartyLookups?: boolean;
 }
 
 /** Flat record describing a single scanner run. */
