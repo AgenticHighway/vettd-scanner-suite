@@ -36,6 +36,11 @@ client ── POST /scans (JSON) ───────────────�
   `cisco-ai-skill-scanner` pip package (`CISCO_SHIM_PORT`, default 8787).
 - **Remote SaaS scanners** (Socket) need no shim; the adapter calls the
   external API directly.
+  Socket (vettd#1168) only ever receives package identities (PURLs) with an exact
+  version, extracted by `src/adapters/dependencies/` from manifests, lockfiles and
+  install/run commands. Paths, URLs, git refs and private-registry entries are dropped
+  at extraction. Safety alerts become findings; license/maintenance/quality alerts and
+  scores become per-dependency signals; anything not checked becomes coverage.
 
 Note: `parity-adapter` in the vettd-skill-scanner repo is a **testing tool
 only** (Rust-vs-TS parity checks) — it is not an integration path; the
