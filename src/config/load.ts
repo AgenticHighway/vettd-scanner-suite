@@ -16,6 +16,7 @@ import {
 	DEFAULT_SOCKET_TIMEOUT_MS,
 	DEFAULT_VETTD_SHIM_URL,
 	type ShimScannerConfig,
+	type SocketScannerConfig,
 	type SuiteConfig,
 } from "./schema.js";
 
@@ -85,6 +86,28 @@ function readUrl(table: Record<string, unknown>, key: string, fallback: string, 
 	return value;
 }
 
+// Lands in a URL path segment, so restrict to slug characters rather than escaping.
+const ORG_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+function readSocketScanner(scanners: Record<string, unknown>): SocketScannerConfig {
+	const ctx = "scanners.socket";
+	const table = optionalTable(scanners, "socket", ctx);
+	checkKeys(table, ["enabled", "timeout_ms", "org_slug"], ctx);
+	const enabled = readBool(table, "enabled", false, ctx);
+	const orgSlug = table.org_slug ?? "";
+	if (typeof orgSlug !== "string" || (orgSlug !== "" && !ORG_SLUG_PATTERN.test(orgSlug))) {
+		throw new ConfigError(`[${ctx}] org_slug must be a Socket org slug (letters, digits, - or _)`);
+	}
+	if (enabled && orgSlug === "") {
+		throw new ConfigError(`[${ctx}] org_slug is required when enabled`);
+	}
+	return {
+		enabled,
+		timeoutMs: readPositiveInt(table, "timeout_ms", DEFAULT_SOCKET_TIMEOUT_MS, ctx),
+		orgSlug,
+	};
+}
+
 function readShimScanner(
 	scanners: Record<string, unknown>,
 	name: string,
@@ -129,8 +152,6 @@ export function parseConfig(toml: string): SuiteConfig {
 	);
 	const vettd = optionalTable(scanners, "vettd", "scanners.vettd");
 	checkKeys(vettd, ["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms"], "scanners.vettd");
-	const socket = optionalTable(scanners, "socket", "scanners.socket");
-	checkKeys(socket, ["enabled", "timeout_ms"], "scanners.socket");
 
 	return {
 		server: {
@@ -149,10 +170,7 @@ export function parseConfig(toml: string): SuiteConfig {
 				concurrency: readPositiveInt(cisco, "concurrency", DEFAULT_CISCO_CONCURRENCY, "scanners.cisco"),
 				queueDepth: readPositiveInt(cisco, "queue_depth", DEFAULT_CISCO_QUEUE_DEPTH, "scanners.cisco"),
 			},
-			socket: {
-				enabled: readBool(socket, "enabled", false, "scanners.socket"),
-				timeoutMs: readPositiveInt(socket, "timeout_ms", DEFAULT_SOCKET_TIMEOUT_MS, "scanners.socket"),
-			},
+			socket: readSocketScanner(scanners),
 		},
 	};
 }

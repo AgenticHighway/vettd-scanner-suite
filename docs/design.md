@@ -187,6 +187,7 @@ explicit.
 | `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
+| `scanners.socket.org_slug` | `""` | Socket org for the org-scoped PURL endpoint; required when enabled |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 

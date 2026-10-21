@@ -85,7 +85,7 @@ describe("socketScanner", () => {
 	// at call time by the adapter, so per-test env stubs apply with no
 	// module-reset dance.
 	function getScanner() {
-		return createSocketScanner({enabled: true, timeoutMs: 30000});
+		return createSocketScanner({enabled: true, timeoutMs: 30000, orgSlug: "acme"});
 	}
 
 	describe("available()", () => {
@@ -136,9 +136,31 @@ describe("socketScanner", () => {
 			}));
 
 			const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-			expect(url).toContain("alerts=true");
+			// Legacy unscoped /v0/purl was removed by Socket; every call must use the org path.
+			expect(url).toBe("https://api.socket.dev/v0/orgs/acme/purl?alerts=true");
 			const body = JSON.parse(init.body as string) as {components: {purl: string}[]};
 			expect(body.components).toContainEqual({purl: "pkg:npm/lodash@4.17.4"});
+		});
+
+		// Consumers read highCount as "critical+high" (docs/design.md); counting on Socket's raw
+		// severity instead under-reports a critical finding as zero high ones.
+		it("counts critical and high findings by the suite convention", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const scanner = getScanner();
+
+			mockSocketOk([makeSocketPackage("lodash", "4.17.4", [
+				makeSocketAlert({severity: "high"}),
+				makeSocketAlert({severity: "critical"}),
+				makeSocketAlert({severity: "middle"}),
+			])]);
+
+			const result = await scanner.scan(makeInput({
+				"package.json": JSON.stringify({dependencies: {lodash: "4.17.4"}}),
+			}));
+
+			expect(result.run.findingCount).toBe(3);
+			expect(result.run.criticalCount).toBe(2);
+			expect(result.run.highCount).toBe(2);
 		});
 
 		it("returns verdict=pass when all alerts are ignored", async () => {

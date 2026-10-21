@@ -10,7 +10,7 @@ services:
     volumes:
       - ./deploy/scanner-suite.docker.toml:/config/scanner-suite.toml:ro
     # Uncomment to enable the socket scanner (also requires
-    # scanners.socket.enabled = true in the mounted config):
+    # scanners.socket.enabled = true and org_slug in the mounted config):
     # environment:
     #   SOCKET_API_KEY: ${SOCKET_API_KEY:-}
     #

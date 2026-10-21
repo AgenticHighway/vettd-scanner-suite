@@ -3,7 +3,13 @@ import type {AssetFinding, ScannerInput, ScannerOutput, SkillScanner} from "../c
 import {logger} from "../logger.js";
 
 const SOCKET_SOURCE_ID = "socket";
-const SOCKET_API_URL = "https://api.socket.dev/v0/purl";
+// Origin is pinned so the token can only ever go to Socket. The legacy unscoped
+// /v0/purl endpoint was removed on 2026-07-30; only the org path segment is configurable.
+const SOCKET_API_ORIGIN = "https://api.socket.dev";
+
+function purlEndpoint(orgSlug: string): string {
+	return `${SOCKET_API_ORIGIN}/v0/orgs/${encodeURIComponent(orgSlug)}/purl`;
+}
 
 // ─── Socket API types ─────────────────────────────────────────────────────────
 
@@ -230,16 +236,17 @@ function mapAlert(alert: SocketAlert, pkg: SocketPackage): AssetFinding | null {
 
 // ─── Socket API call ──────────────────────────────────────────────────────────
 
-async function querySocket(purls: string[], apiKey: string, timeoutMs: number): Promise<SocketPackage[]> {
-	logger.debug({module: "external-scanners.socket", scannerId: SOCKET_SOURCE_ID, endpoint: SOCKET_API_URL, purlCount: purls.length}, "dispatching outbound HTTP call to Socket.dev");
-	const res = await fetch(`${SOCKET_API_URL}?alerts=true`, {
+async function querySocket(purls: string[], apiKey: string, cfg: SocketScannerConfig): Promise<SocketPackage[]> {
+	const endpoint = purlEndpoint(cfg.orgSlug);
+	logger.debug({module: "external-scanners.socket", scannerId: SOCKET_SOURCE_ID, endpoint, purlCount: purls.length}, "dispatching outbound HTTP call to Socket.dev");
+	const res = await fetch(`${endpoint}?alerts=true`, {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${apiKey}`,
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({components: purls.map((purl) => ({purl}))}),
-		signal: AbortSignal.timeout(timeoutMs),
+		signal: AbortSignal.timeout(cfg.timeoutMs),
 	});
 
 	if (res.status === 429) {
@@ -306,7 +313,7 @@ export function createSocketScanner(cfg: SocketScannerConfig): SkillScanner {
 
 			let packages: SocketPackage[];
 			try {
-				packages = await querySocket(purls, apiKey, cfg.timeoutMs);
+				packages = await querySocket(purls, apiKey, cfg);
 			} catch (err) {
 				const isTimeout = err instanceof Error && err.name === "TimeoutError";
 				const status = isTimeout ? "timeout" : "errored";
@@ -332,20 +339,17 @@ export function createSocketScanner(cfg: SocketScannerConfig): SkillScanner {
 			}
 
 			const findings: AssetFinding[] = [];
-			let criticalCount = 0;
-			let highCount = 0;
 			for (const pkg of packages) {
 				for (const alert of pkg.alerts ?? []) {
 					const finding = mapAlert(alert, pkg);
-					if (finding) {
-						findings.push(finding);
-						if (["critical","high"].includes(finding.severity)) {
-							if (alert.severity === "critical") criticalCount++;
-							else highCount++;
-						}
-					}
+					if (finding) findings.push(finding);
 				}
 			}
+
+			// Suite convention (docs/design.md): criticalCount counts critical findings,
+			// highCount counts critical+high. Counted on the mapped severity, not Socket's raw one.
+			const criticalCount = findings.filter((f) => f.severity === "critical").length;
+			const highCount = findings.filter((f) => f.severity === "critical" || f.severity === "high").length;
 
 			const verdict = findings.some((f) => ["critical","high"].includes(f.severity))
 				? "fail"
