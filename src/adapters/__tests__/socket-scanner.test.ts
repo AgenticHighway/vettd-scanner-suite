@@ -10,10 +10,11 @@ vi.stubGlobal("fetch", mockFetch);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeInput(files: Record<string, string> = {}): ScannerInput {
+function makeInput(files: Record<string, string> = {}, allowThirdPartyLookups: boolean | undefined = true): ScannerInput {
 	return {
 		textFiles: new Map(Object.entries(files)),
 		allPaths: Object.keys(files),
+		allowThirdPartyLookups,
 	};
 }
 
@@ -85,7 +86,7 @@ describe("socketScanner", () => {
 	// at call time by the adapter, so per-test env stubs apply with no
 	// module-reset dance.
 	function getScanner() {
-		return createSocketScanner({enabled: true, timeoutMs: 30000});
+		return createSocketScanner({enabled: true, timeoutMs: 30000, orgSlug: "acme"});
 	}
 
 	describe("available()", () => {
@@ -136,9 +137,31 @@ describe("socketScanner", () => {
 			}));
 
 			const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-			expect(url).toContain("alerts=true");
+			// Legacy unscoped /v0/purl was removed by Socket; every call must use the org path.
+			expect(url).toBe("https://api.socket.dev/v0/orgs/acme/purl?alerts=true");
 			const body = JSON.parse(init.body as string) as {components: {purl: string}[]};
 			expect(body.components).toContainEqual({purl: "pkg:npm/lodash@4.17.4"});
+		});
+
+		// Consumers read highCount as "critical+high" (docs/design.md); counting on Socket's raw
+		// severity instead under-reports a critical finding as zero high ones.
+		it("counts critical and high findings by the suite convention", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const scanner = getScanner();
+
+			mockSocketOk([makeSocketPackage("lodash", "4.17.4", [
+				makeSocketAlert({severity: "high"}),
+				makeSocketAlert({severity: "critical"}),
+				makeSocketAlert({severity: "middle"}),
+			])]);
+
+			const result = await scanner.scan(makeInput({
+				"package.json": JSON.stringify({dependencies: {lodash: "4.17.4"}}),
+			}));
+
+			expect(result.run.findingCount).toBe(3);
+			expect(result.run.criticalCount).toBe(2);
+			expect(result.run.highCount).toBe(2);
 		});
 
 		it("returns verdict=pass when all alerts are ignored", async () => {
@@ -213,6 +236,95 @@ describe("socketScanner", () => {
 		});
 	});
 
+	// vettd#1168: private assets are opt-in. Absent must mean "not allowed" so an older caller
+	// that never sends the flag cannot leak dependencies, and the skip must be visible as
+	// coverage so a clean result is not read as "checked, nothing found".
+	describe("scan() — third-party lookup permission", () => {
+		const pkgJson = {"package.json": JSON.stringify({dependencies: {lodash: "4.17.4"}})};
+
+		it.each([undefined, false])("does not call Socket when allowThirdPartyLookups is %s", async (allow) => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const input = {...makeInput(pkgJson), allowThirdPartyLookups: allow};
+			const result = await getScanner().scan(input);
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(result.run.status).toBe("skipped");
+			expect(result.coverage).toEqual([
+				expect.objectContaining({kind: "coverage", ruleId: "security/socket-lookups-not-permitted"}),
+			]);
+		});
+
+		it("emits no coverage notice when the asset has no dependencies", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const result = await getScanner().scan(makeInput({"SKILL.md": "# hi"}, false));
+
+			expect(result.run.status).toBe("skipped");
+			expect(result.coverage).toBeUndefined();
+		});
+	});
+
+	// vettd#1168: a result must say what was and was not checked, so "no findings" is never
+	// mistaken for "clean" when Socket could not see some dependencies.
+	describe("scan() — signals and coverage", () => {
+		const pkgJson = {"package.json": JSON.stringify({dependencies: {lodash: "4.17.4"}})};
+
+		it("lists each checked dependency and its score as signals", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			mockSocketOk([makeSocketPackage("lodash", "4.17.4", [])]);
+
+			const result = await getScanner().scan(makeInput(pkgJson));
+
+			expect(result.signals).toEqual(expect.arrayContaining([
+				expect.objectContaining({ruleId: "compatibility/declared-dependencies", relatedId: "pkg:npm/lodash@4.17.4", valueText: "pkg:npm/lodash@4.17.4", derivation: "read"}),
+				expect.objectContaining({ruleId: "reliability/dependency-score", relatedId: "pkg:npm/lodash@4.17.4", valueNum: 0.25}),
+			]));
+		});
+
+		it("reports packages Socket could not resolve as coverage, not findings", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			mockSocketOk([makeSocketPackage("lodash", "4.17.4", [makeSocketAlert({type: "notFound", category: "other", severity: "low"})])]);
+
+			const result = await getScanner().scan(makeInput(pkgJson));
+
+			expect(result.findings).toEqual([]);
+			expect(result.coverage).toContainEqual(expect.objectContaining({ruleId: "security/socket-dependency-not-found"}));
+		});
+
+		it("reports unversioned dependencies as coverage and sends only pinned ones", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			mockSocketOk([makeSocketPackage("lodash", "4.17.4", [])]);
+
+			const result = await getScanner().scan(makeInput({...pkgJson, "SKILL.md": "Run `npx cowsay hi`"}));
+
+			const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string) as {components: {purl: string}[]};
+			expect(body.components).toEqual([{purl: "pkg:npm/lodash@4.17.4"}]);
+			expect(result.coverage).toContainEqual(expect.objectContaining({ruleId: "security/socket-unversioned-dependencies"}));
+		});
+
+		it("skips without calling Socket when only unversioned dependencies are found", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+
+			const result = await getScanner().scan(makeInput({"SKILL.md": "pip install requests"}));
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(result.run.status).toBe("skipped");
+			expect(result.coverage).toContainEqual(expect.objectContaining({ruleId: "security/socket-unversioned-dependencies"}));
+		});
+
+		// Socket rejects a batch over 1024 with a 400, which would lose the whole scan.
+		it("caps one request at Socket's batch limit and says so", async () => {
+			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
+			const deps = Object.fromEntries(Array.from({length: 1030}, (_, i) => [`pkg-${i}`, "1.0.0"]));
+			mockSocketOk([]);
+
+			const result = await getScanner().scan(makeInput({"package.json": JSON.stringify({dependencies: deps})}));
+
+			const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string) as {components: unknown[]};
+			expect(body.components).toHaveLength(1024);
+			expect(result.coverage).toContainEqual(expect.objectContaining({ruleId: "security/socket-dependency-limit"}));
+		});
+	});
+
 	describe("scan() — error handling", () => {
 		it("returns errored status on 429 with quota message", async () => {
 			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
@@ -261,7 +373,9 @@ describe("socketScanner", () => {
 			expect(result.findings[0].severity).toBe("critical");
 		});
 
-		it("maps license alert to best-practices category with warn severity", async () => {
+		// vettd#1168: license risk is not a safety finding. It routes to the signal pipeline, so it
+		// must not appear as a finding (which would move the trust verdict).
+		it("maps a license alert to a per-dependency signal, not a finding", async () => {
 			vi.stubEnv("SOCKET_API_KEY", "sk_test_123");
 			const scanner = getScanner();
 
@@ -273,8 +387,14 @@ describe("socketScanner", () => {
 				"package.json": JSON.stringify({dependencies: {"gpl-lib": "2.0.0"}}),
 			}));
 
-			expect(result.findings[0].category).toBe("best-practices");
-			expect(result.findings[0].severity).toBe("medium");
+			expect(result.findings).toEqual([]);
+			expect(result.signals).toContainEqual(expect.objectContaining({
+				ruleId: "compatibility/dependency-license-risk",
+				dataCategory: "compatibility",
+				relatedType: "declared_package",
+				relatedId: "pkg:npm/gpl-lib@2.0.0",
+				severity: "low",
+			}));
 		});
 
 		it("maps mediumCVE (severity=middle) to warn", async () => {

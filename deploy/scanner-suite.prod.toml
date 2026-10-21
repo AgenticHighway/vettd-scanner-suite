@@ -35,3 +35,10 @@ scan_timeout_ms = 30000
 # any effect — that lives in the task definition, not this file.
 concurrency = 2
 queue_depth = 50
+
+[scanners.socket]
+# Dependency lookups (vettd#1168). To enable: set org_slug, flip enabled, and add
+# SOCKET_API_KEY to the suite container from Secrets Manager in the task definition.
+enabled = false
+timeout_ms = 30000
+# org_slug = ""

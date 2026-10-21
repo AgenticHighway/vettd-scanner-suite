@@ -29,6 +29,7 @@ queue_depth = 10
 [scanners.socket]
 enabled = true
 timeout_ms = 15000
+org_slug = "acme"
 `;
 
 describe("parseConfig", () => {
@@ -47,7 +48,7 @@ describe("parseConfig", () => {
 					concurrency: 3,
 					queueDepth: 10,
 				},
-				socket: {enabled: true, timeoutMs: 15000},
+				socket: {enabled: true, timeoutMs: 15000, orgSlug: "acme"},
 			},
 		});
 	});
@@ -111,6 +112,16 @@ describe("parseConfig", () => {
 
 	it("rejects a non-boolean enabled", () => {
 		expect(() => parseConfig('[scanners.socket]\nenabled = "yes"\n')).toThrow(/must be a boolean/);
+	});
+
+	// Without a slug the org-scoped endpoint can't be built; fail at boot, not on every scan.
+	it("requires socket org_slug when socket is enabled", () => {
+		expect(() => parseConfig("[scanners.socket]\nenabled = true\n")).toThrow(/org_slug is required/);
+	});
+
+	// The slug becomes a URL path segment next to the API token.
+	it("rejects a socket org_slug with path characters", () => {
+		expect(() => parseConfig('[scanners.socket]\norg_slug = "acme/../x"\n')).toThrow(/org_slug must be/);
 	});
 
 	it("rejects invalid TOML syntax", () => {

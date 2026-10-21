@@ -51,6 +51,8 @@ export interface CiscoScannerConfig extends ShimScannerConfig {
 export interface SocketScannerConfig {
 	enabled: boolean;
 	timeoutMs: number;
+	/** Socket org the token belongs to; part of the org-scoped PURL endpoint path. Required when enabled. */
+	orgSlug: string;
 }
 
 export interface SuiteConfig {

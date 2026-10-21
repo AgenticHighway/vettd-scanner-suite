@@ -25,6 +25,7 @@ interface SubmitBody {
 	allPaths: string[];
 	bundlePath?: string;
 	repoPaths?: string[];
+	allowThirdPartyLookups?: boolean;
 }
 
 // Custom content-type parser for application/json. Captures the raw body as a
@@ -98,6 +99,10 @@ function validateScanItem(parsed: unknown): ItemValidation {
 		}
 	}
 
+	if (body.allowThirdPartyLookups !== undefined && typeof body.allowThirdPartyLookups !== "boolean") {
+		return {ok: false, error: "malformed body — 'allowThirdPartyLookups' must be a boolean"};
+	}
+
 	// Size guards. Fail the request immediately — the executor never sees
 	// oversized input, and callers don't poll to find out.
 	if (body.allPaths.length > MAX_FILES) {
@@ -127,7 +132,13 @@ function validateScanItem(parsed: unknown): ItemValidation {
 	const textFiles = new Map(Object.entries(body.textFiles));
 	return {
 		ok: true,
-		input: {textFiles, allPaths: body.allPaths, bundlePath: body.bundlePath, repoPaths: body.repoPaths},
+		input: {
+			textFiles,
+			allPaths: body.allPaths,
+			bundlePath: body.bundlePath,
+			repoPaths: body.repoPaths,
+			allowThirdPartyLookups: body.allowThirdPartyLookups,
+		},
 	};
 }
 

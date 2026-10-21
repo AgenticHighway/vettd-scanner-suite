@@ -36,6 +36,11 @@ client ── POST /scans (JSON) ───────────────�
   `cisco-ai-skill-scanner` pip package (`CISCO_SHIM_PORT`, default 8787).
 - **Remote SaaS scanners** (Socket) need no shim; the adapter calls the
   external API directly.
+  Socket (vettd#1168) only ever receives package identities (PURLs) with an exact
+  version, extracted by `src/adapters/dependencies/` from manifests, lockfiles and
+  install/run commands. Paths, URLs, git refs and private-registry entries are dropped
+  at extraction. Safety alerts become findings; license/maintenance/quality alerts and
+  scores become per-dependency signals; anything not checked becomes coverage.
 
 Note: `parity-adapter` in the vettd-skill-scanner repo is a **testing tool
 only** (Rust-vs-TS parity checks) — it is not an integration path; the
@@ -86,6 +91,7 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
 ```
 
 - Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`.
+- Optional `allowThirdPartyLookups` (boolean, vettd#1168): whether dependency identities may be sent to a third-party lookup service (Socket). Absent means not allowed; the caller decides from asset visibility and tenant settings.
 - The job store is **in-memory behind the narrow `JobStore` interface**
   (`create`/`get`/`transition`/`attachResults`) — the seam for a future
   durable store (SQS/DB). A restart loses jobs; callers see a 404 on poll and
@@ -187,6 +193,7 @@ explicit.
 | `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
+| `scanners.socket.org_slug` | `""` | Socket org for the org-scoped PURL endpoint; required when enabled |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 

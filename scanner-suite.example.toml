@@ -43,3 +43,5 @@ queue_depth = 50
 # Socket.dev dependency analysis (external SaaS; requires SOCKET_API_KEY).
 enabled = false
 timeout_ms = 30000
+# Socket org the token belongs to (org-scoped PURL endpoint). Required when enabled.
+# org_slug = "your-org"
