@@ -1,4 +1,4 @@
-import Fastify, {type FastifyBaseLogger, type FastifyInstance, type FastifyRequest} from "fastify";
+import Fastify, {LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyRequest} from "fastify";
 
 import {MAX_BODY_BYTES, MAX_FILES, MAX_TEXT_FILE_BYTES, MAX_TOTAL_TEXT_BYTES} from "../consts.js";
 import type {ScannerInput} from "../contract/scanner.js";
@@ -165,16 +165,28 @@ function renderBatch(store: JobStore, batch: ScanBatch) {
 export function buildApp(deps: AppDeps): FastifyInstance {
 	// Widen to FastifyBaseLogger so the instance type stays the default
 	// FastifyInstance (fastify parameterizes its generics by the logger type).
-	const app = Fastify({loggerInstance: logger as FastifyBaseLogger, bodyLimit: MAX_BODY_BYTES});
+	//
+	// logController with a per-request disable: /health is hit every ~10s by
+	// Docker HEALTHCHECK (and polled before every scan by adapters'
+	// available() checks), so fastify's automatic "incoming request" /
+	// "request completed" lines would flood info-level output with entries
+	// that carry no operational value (issue #25). A route-level logLevel
+	// does NOT help here — those lines are emitted via .info() calls, and
+	// logLevel only lowers the child logger's threshold. Every other route
+	// keeps fastify's default info-level request logging.
+	const app = Fastify({
+		loggerInstance: logger as FastifyBaseLogger,
+		bodyLimit: MAX_BODY_BYTES,
+		logController: new LogController({
+			disableRequestLogging: (req) => req.url === "/health",
+		}),
+	});
 
 	// Override Fastify's default JSON parser so our handler sees the raw
 	// body string and can return its own 400 for malformed JSON.
 	app.addContentTypeParser("application/json", {}, jsonBodyParser);
 
-	// logLevel: "debug" — this route is hit every 10s by Docker HEALTHCHECK
-	// (and polled before every scan by adapters' available() checks), so its
-	// automatic request/response logs would otherwise flood info-level output.
-	app.get("/health", {logLevel: "debug"}, async () => ({ok: true}));
+	app.get("/health", async () => ({ok: true}));
 
 	app.post("/scans", async (request, reply) => {
 		const raw = request.body as string | undefined;
