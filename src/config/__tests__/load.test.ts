@@ -29,6 +29,14 @@ queue_depth = 10
 [scanners.socket]
 enabled = true
 timeout_ms = 15000
+
+[scanners.jev]
+enabled = true
+model = "typesafe/jev-test"
+endpoint = "https://example.test/decisions"
+timeout_ms = 20000
+margin_threshold = 0.6
+max_payload_chars = 5000
 `;
 
 describe("parseConfig", () => {
@@ -48,6 +56,14 @@ describe("parseConfig", () => {
 					queueDepth: 10,
 				},
 				socket: {enabled: true, timeoutMs: 15000},
+				jev: {
+					enabled: true,
+					model: "typesafe/jev-test",
+					endpoint: "https://example.test/decisions",
+					timeoutMs: 20000,
+					marginThreshold: 0.6,
+					maxPayloadChars: 5000,
+				},
 			},
 		});
 	});
@@ -61,6 +77,14 @@ describe("parseConfig", () => {
 		expect(config.scanners.cisco.concurrency).toBe(1);
 		expect(config.scanners.cisco.queueDepth).toBe(50);
 		expect(config.scanners.socket.timeoutMs).toBe(30000);
+		expect(config.scanners.jev).toEqual({
+			enabled: false,
+			model: "typesafe/jev-1.13",
+			endpoint: "https://openrouter.ai/api/alpha/decisions",
+			timeoutMs: 45000,
+			marginThreshold: 0.5,
+			maxPayloadChars: 100000,
+		});
 	});
 
 	// Fail-safe: a config that never mentions a scanner must not run it.
@@ -69,6 +93,7 @@ describe("parseConfig", () => {
 		expect(config.scanners.vettd.enabled).toBe(false);
 		expect(config.scanners.cisco.enabled).toBe(false);
 		expect(config.scanners.socket.enabled).toBe(false);
+		expect(config.scanners.jev.enabled).toBe(false);
 	});
 
 	// Typo protection: [scanners.vetd] must be an error, not a silently
@@ -111,6 +136,8 @@ describe("parseConfig", () => {
 
 	it("rejects a non-boolean enabled", () => {
 		expect(() => parseConfig('[scanners.socket]\nenabled = "yes"\n')).toThrow(/must be a boolean/);
+		expect(() => parseConfig("[scanners.jev]\nmargin_threshold = 1.5\n")).toThrow(/between 0 and 1/);
+		expect(() => parseConfig("[scanners.jev]\nmodle = 'x'\n")).toThrow(/unknown key "modle"/);
 	});
 
 	it("rejects invalid TOML syntax", () => {

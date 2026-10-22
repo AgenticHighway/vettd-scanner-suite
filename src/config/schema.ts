@@ -15,6 +15,12 @@ export const DEFAULT_HEALTH_TIMEOUT_MS = 2_000;
 export const DEFAULT_SCAN_TIMEOUT_MS = 30_000;
 export const DEFAULT_CISCO_QUEUE_DEPTH = 50;
 export const DEFAULT_SOCKET_TIMEOUT_MS = 30_000;
+export const DEFAULT_JEV_MODEL = "typesafe/jev-1.13";
+export const DEFAULT_JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
+// Per call (rule scan, then aggregate), so a full run stays inside jobs.scannerTimeoutMs.
+export const DEFAULT_JEV_TIMEOUT_MS = 45_000;
+export const DEFAULT_JEV_MARGIN_THRESHOLD = 0.5;
+export const DEFAULT_JEV_MAX_PAYLOAD_CHARS = 100_000;
 
 export interface ServerConfig {
 	host: string;
@@ -53,6 +59,25 @@ export interface SocketScannerConfig {
 	timeoutMs: number;
 }
 
+/**
+ * JEV rule scan via OpenRouter's Decisions API — external SaaS, no shim; OPENROUTER_API_KEY comes
+ * from the environment.
+ */
+export interface JevScannerConfig {
+	enabled: boolean;
+	model: string;
+	endpoint: string;
+	/** Per HTTP call. */
+	timeoutMs: number;
+	/**
+	 * A rule counts as fired only when its non-"none" probability mass beats "none" by at least
+	 * this much. 0.5 means p(fired) >= 0.75; a coin-flip plurality never clears it.
+	 */
+	marginThreshold: number;
+	/** Cap on the concatenated skill text sent to the model, in characters. */
+	maxPayloadChars: number;
+}
+
 export interface SuiteConfig {
 	server: ServerConfig;
 	jobs: JobsConfig;
@@ -60,5 +85,6 @@ export interface SuiteConfig {
 		vettd: ShimScannerConfig;
 		cisco: CiscoScannerConfig;
 		socket: SocketScannerConfig;
+		jev: JevScannerConfig;
 	};
 }

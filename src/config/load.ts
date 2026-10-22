@@ -7,6 +7,11 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
+	DEFAULT_JEV_ENDPOINT,
+	DEFAULT_JEV_MARGIN_THRESHOLD,
+	DEFAULT_JEV_MAX_PAYLOAD_CHARS,
+	DEFAULT_JEV_MODEL,
+	DEFAULT_JEV_TIMEOUT_MS,
 	DEFAULT_MAX_BATCH_ITEMS,
 	DEFAULT_MAX_CONCURRENT_JOBS,
 	DEFAULT_SCANNER_TIMEOUT_MS,
@@ -58,6 +63,15 @@ function readPositiveInt(table: Record<string, unknown>, key: string, fallback: 
 	if (value === undefined) return fallback;
 	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
 		throw new ConfigError(`[${ctx}] ${key} must be a positive integer`);
+	}
+	return value;
+}
+
+function readUnitInterval(table: Record<string, unknown>, key: string, fallback: number, ctx: string): number {
+	const value = table[key];
+	if (value === undefined) return fallback;
+	if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
+		throw new ConfigError(`[${ctx}] ${key} must be a number between 0 and 1`);
 	}
 	return value;
 }
@@ -119,7 +133,7 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items"], "jobs");
 
 	const scanners = optionalTable(root, "scanners", "scanners");
-	checkKeys(scanners, ["vettd", "cisco", "socket"], "scanners");
+	checkKeys(scanners, ["vettd", "cisco", "socket", "jev"], "scanners");
 
 	const cisco = optionalTable(scanners, "cisco", "scanners.cisco");
 	checkKeys(
@@ -131,6 +145,12 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(vettd, ["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms"], "scanners.vettd");
 	const socket = optionalTable(scanners, "socket", "scanners.socket");
 	checkKeys(socket, ["enabled", "timeout_ms"], "scanners.socket");
+	const jev = optionalTable(scanners, "jev", "scanners.jev");
+	checkKeys(
+		jev,
+		["enabled", "model", "endpoint", "timeout_ms", "margin_threshold", "max_payload_chars"],
+		"scanners.jev",
+	);
 
 	return {
 		server: {
@@ -152,6 +172,14 @@ export function parseConfig(toml: string): SuiteConfig {
 			socket: {
 				enabled: readBool(socket, "enabled", false, "scanners.socket"),
 				timeoutMs: readPositiveInt(socket, "timeout_ms", DEFAULT_SOCKET_TIMEOUT_MS, "scanners.socket"),
+			},
+			jev: {
+				enabled: readBool(jev, "enabled", false, "scanners.jev"),
+				model: readHost(jev, "model", DEFAULT_JEV_MODEL, "scanners.jev"),
+				endpoint: readUrl(jev, "endpoint", DEFAULT_JEV_ENDPOINT, "scanners.jev"),
+				timeoutMs: readPositiveInt(jev, "timeout_ms", DEFAULT_JEV_TIMEOUT_MS, "scanners.jev"),
+				marginThreshold: readUnitInterval(jev, "margin_threshold", DEFAULT_JEV_MARGIN_THRESHOLD, "scanners.jev"),
+				maxPayloadChars: readPositiveInt(jev, "max_payload_chars", DEFAULT_JEV_MAX_PAYLOAD_CHARS, "scanners.jev"),
 			},
 		},
 	};
