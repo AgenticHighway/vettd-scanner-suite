@@ -5,7 +5,8 @@
 // - classification rules: always -> AssetSignal carrying the chosen option as valueText, with a
 //   severity only when that option is a negative one. A finding implies a severity; a severity does
 //   not imply a finding.
-// Every row states `derivation: "inferred"` and the model's confidence.
+// Every row states `derivation: "inferred"`, the model's confidence, and in `payload` the evidence
+// (choice, every option's probability, and the margin for fired rules).
 
 import type {AssetFinding, AssetSignal} from "../contract/scanner.js";
 import type {RuleEvaluation} from "./evaluate.js";
@@ -19,6 +20,16 @@ export function findingText(rule: System1Rule): string {
 	if (rule.kind === "score") return rule.instructions;
 	if (rule.kind === "classification") return rule.summary;
 	return rule.present.replace(/^The skill package contains /, "").replace(/\.$/, "");
+}
+
+/** The basis for one judgment, persisted per row so every surface can show it, not just rawReport. */
+function evidence(e: RuleEvaluation, model: string): Record<string, unknown> {
+	return {
+		model,
+		choice: e.choice,
+		probabilities: e.probabilities,
+		...(e.rule.kind === "classification" ? {} : {margin: e.margin}),
+	};
 }
 
 function severityFor(rule: System1Rule, level: string): System1Severity {
@@ -51,6 +62,7 @@ export function mapEvaluations(
 				derivation: "inferred",
 				confidence: e.confidence,
 				method: model,
+				payload: evidence(e, model),
 			});
 			continue;
 		}
@@ -71,6 +83,7 @@ export function mapEvaluations(
 				derivation: "inferred",
 				confidence: e.confidence,
 				method: model,
+				payload: evidence(e, model),
 			});
 		} else {
 			findings.push({
@@ -82,6 +95,7 @@ export function mapEvaluations(
 				ruleId: rule.ruleId,
 				derivation: "inferred",
 				confidence: e.confidence,
+				payload: evidence(e, model),
 			});
 		}
 	}

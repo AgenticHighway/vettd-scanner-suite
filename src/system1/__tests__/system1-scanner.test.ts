@@ -287,6 +287,52 @@ describe("system1 scanner", () => {
 		});
 	});
 
+	// Classifications describe the skill; only defects decide the run. A benign skill with a
+	// low-severity "missing usage context" must not read as a warn.
+	describe("run verdict", () => {
+		it("passes a skill whose only severities come from classifications", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response({instruction_clarity: classAnswer(["clear", "underspecified", "ambiguous", "contradictory"], "contradictory", 0.9)}));
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			expect(out.signals?.some((s) => s.severity === "medium")).toBe(true);
+			expect(out.run.verdict).toBe("pass");
+		});
+	});
+
+	// Every surface (API, report.md) shows the basis for a judgment, so it travels on the row.
+	describe("evidence payload", () => {
+		it("carries model, choice, probabilities and margin on findings, and no margin on classifications", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response({data_exfiltration: answer(0.97)}));
+			mockJson(stage2Response("CRITICAL"));
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			const p = out.findings[0].payload as {model: string; choice: string; probabilities: Record<string, number>; margin: number};
+			expect(p.model).toBe(CFG.model);
+			expect(p.probabilities.present).toBeCloseTo(0.97);
+			expect(p.margin).toBeGreaterThan(0.5);
+			const cls = out.signals?.find((s) => s.ruleId === "reliability/instruction-clarity");
+			expect(cls?.payload).toMatchObject({model: CFG.model, choice: cls?.valueText});
+			expect(cls?.payload).not.toHaveProperty("margin");
+		});
+	});
+
+	// A credential in the skill must never reach the model provider; the placeholder keeps the
+	// hardcoded-key rule answerable.
+	describe("redaction", () => {
+		it("sends placeholders, not secret values, and records counts only", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response());
+			const key = "ghp_" + "a".repeat(36);
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD, "run.py": `TOKEN = "${key}"\n`}));
+			const sent = JSON.stringify(bodyOfCall(0));
+			expect(sent).not.toContain(key);
+			expect(sent).toContain("[REDACTED:github-token]");
+			const raw = out.run.rawReport as {payload: {redactions: Record<string, number>}};
+			expect(raw.payload.redactions).toEqual({"github-token": 1});
+			expect(JSON.stringify(out)).not.toContain(key);
+		});
+	});
+
 	describe("malicious skill", () => {
 		async function run() {
 			vi.stubEnv("OPENROUTER_API_KEY", "k");

@@ -1,5 +1,8 @@
 // What System 1 reads: the shallowest SKILL.md first, then scripts and dependency manifests in
-// path order, each as `### FILE: <path>`, capped at a character budget.
+// path order, each as `### FILE: <path>`, capped at a character budget. Secrets are replaced with
+// typed placeholders before anything is measured or sent.
+
+import {redactSecrets} from "./redact.js";
 
 const SCRIPT_EXTENSIONS = new Set([
 	"py", "js", "mjs", "cjs", "ts", "sh", "bash", "zsh", "rb", "go", "rs", "ps1", "pl", "php", "java", "lua",
@@ -30,6 +33,8 @@ export interface Payload {
 	/** Eligible files dropped (or cut short) to stay under the character cap. */
 	omittedPaths: string[];
 	truncated: boolean;
+	/** Secrets replaced before sending, counted by type; never the values. */
+	redactions: Record<string, number>;
 }
 
 /**
@@ -49,6 +54,7 @@ export function buildPayload(textFiles: Map<string, string>, maxChars: number): 
 	const omittedPaths: string[] = [];
 	let used = 0;
 	let truncated = false;
+	const redactions: Record<string, number> = {};
 	for (const path of ordered) {
 		const remaining = maxChars - used;
 		if (remaining <= 0) {
@@ -57,7 +63,7 @@ export function buildPayload(textFiles: Map<string, string>, maxChars: number): 
 			continue;
 		}
 		const header = `### FILE: ${path}\n`;
-		const content = textFiles.get(path) ?? "";
+		const content = redactSecrets(textFiles.get(path) ?? "", redactions).text;
 		let section = header + content;
 		if (section.length > remaining) {
 			section = section.slice(0, remaining);
@@ -68,7 +74,7 @@ export function buildPayload(textFiles: Map<string, string>, maxChars: number): 
 		includedPaths.push(path);
 		used += section.length + 2; // "\n\n" separator
 	}
-	return {text: sections.join("\n\n"), includedPaths, omittedPaths, truncated};
+	return {text: sections.join("\n\n"), includedPaths, omittedPaths, truncated, redactions};
 }
 
 export function skillNameFromPayload(textFiles: Map<string, string>): string {

@@ -102,8 +102,11 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 					logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 aggregate call failed; deriving verdict from findings");
 				}
 			}
-			// With no safety finding the aggregate says nothing about severities carried by signals.
-			const derived = verdictFromSeverities([...findings, ...signals].map((f) => f.severity ?? "info"));
+			// With no safety finding the aggregate says nothing about defect signals, so derive from
+			// findings and finding-shaped signals. Classifications describe the skill rather than
+			// report a defect, so their severities grade a category but never the run.
+			const defects = signals.filter((s) => s.valueText === undefined);
+			const derived = verdictFromSeverities([...findings, ...defects].map((f) => f.severity ?? "info"));
 			const runVerdict = verdict && firedSafety.length > 0 ? runVerdictFor(verdict) : derived;
 
 			const duration = Date.now() - startedAt;
@@ -132,6 +135,7 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 							includedPaths: payload.includedPaths,
 							omittedPaths: payload.omittedPaths,
 							truncated: payload.truncated,
+							redactions: payload.redactions,
 						},
 						stage1: {
 							usage: stage1Response.usage ?? null,
