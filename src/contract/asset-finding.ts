@@ -34,4 +34,6 @@ export interface AssetFinding {
 	derivation?: string | null;
 	/** Emitter confidence in the finding, 0-1 inclusive. Null must never be read as zero confidence. */
 	confidence?: number | null;
+	/** Emitter tail ONLY (e.g. a model's per-option probabilities); nothing queries or indexes this. */
+	payload?: Record<string, unknown> | null;
 }
