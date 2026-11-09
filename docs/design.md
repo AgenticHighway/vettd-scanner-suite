@@ -191,7 +191,7 @@ explicit.
 | `scanners.system1.model` | `typesafe/jev-1.13` | Model; the OpenRouter endpoint is pinned in the connector so the key cannot be redirected |
 | `scanners.system1.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
 | `scanners.system1.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
-| `scanners.system1.max_payload_chars` | `100000` | Cap on the SKILL.md + scripts text sent |
+| `scanners.system1.part_chars` / `.max_parts` | `400000` / `25` | Every text file is read, split into parts of this many characters per model call; past `max_parts` the run is marked truncated |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 

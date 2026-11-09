@@ -19,7 +19,12 @@ export const DEFAULT_SYSTEM1_MODEL = "typesafe/jev-1.13";
 // Per call (rule scan, then aggregate), so a full run stays inside jobs.scannerTimeoutMs.
 export const DEFAULT_SYSTEM1_TIMEOUT_MS = 45_000;
 export const DEFAULT_SYSTEM1_MARGIN_THRESHOLD = 0.5;
-export const DEFAULT_SYSTEM1_MAX_PAYLOAD_CHARS = 100_000;
+/** Characters per model call. Dense code runs about 2.4 characters a token and one call takes about
+ *  250k tokens (measured 2026-11-09: 600k characters fit, 700k did not), so 400k leaves room for the
+ *  questions. */
+export const DEFAULT_SYSTEM1_PART_CHARS = 400_000;
+/** Abuse ceiling only: 25 parts is 10 MB, vettd's own fetch limit for a skill's text. */
+export const DEFAULT_SYSTEM1_MAX_PARTS = 25;
 
 export interface ServerConfig {
 	host: string;
@@ -73,8 +78,10 @@ export interface System1ScannerConfig {
 	 * this much. 0.5 means p(fired) >= 0.75; a coin-flip plurality never clears it.
 	 */
 	marginThreshold: number;
-	/** Cap on the concatenated skill text sent to the model, in characters. */
-	maxPayloadChars: number;
+	/** Characters per model call; larger skills are split into parts of this size. */
+	partChars: number;
+	/** Most parts read; past this the run is marked truncated. */
+	maxParts: number;
 }
 
 export interface SuiteConfig {

@@ -6,7 +6,10 @@ import {redactSecrets} from "../redact.js";
 const SKILL_MD = "---\nname: demo-skill\ndescription: A demo.\n---\n# Demo\n";
 
 describe("buildPayload", () => {
-	it("sends SKILL.md first, then scripts and manifests, and leaves references out", () => {
+	const all = (p: ReturnType<typeof buildPayload>) => p.parts.map((x) => x.text).join("\n");
+
+	// A verdict about a skill is only honest if the whole skill was read, references included.
+	it("reads every text file, SKILL.md first, then scripts and manifests, then the rest", () => {
 		const p = buildPayload(
 			new Map([
 				["scripts/run.py", "print(1)"],
@@ -15,30 +18,46 @@ describe("buildPayload", () => {
 				["requirements.txt", "requests"],
 			]),
 			10_000,
+			25,
 		);
-		expect(p.includedPaths).toEqual(["SKILL.md", "requirements.txt", "scripts/run.py"]);
-		expect(p.text.startsWith("### FILE: SKILL.md\n")).toBe(true);
-		expect(p.text).not.toContain("long reference");
+		expect(p.parts).toHaveLength(1);
+		expect(p.includedPaths).toEqual(["SKILL.md", "requirements.txt", "scripts/run.py", "references/guide.md"]);
+		expect(p.parts[0].text.startsWith("### FILE: SKILL.md\n")).toBe(true);
 		expect(p.truncated).toBe(false);
 	});
 
-	// Truncation must be visible: a silent cut would let an incomplete read look like a clean SAFE.
-	it("cuts at the character cap and reports what was dropped", () => {
-		const p = buildPayload(
-			new Map([
-				["SKILL.md", "x".repeat(60)],
-				["a.py", "y".repeat(500)],
-				["b.py", "z".repeat(500)],
-			]),
-			200,
-		);
-		expect(p.text.length).toBeLessThanOrEqual(200 + 4);
+	// One call has a hard input limit; a big skill is split, never cut, and every part keeps the
+	// instructions in view so behaviour can still be compared with them.
+	it("splits a skill larger than one part, repeating SKILL.md in every part and losing nothing", () => {
+		const files = new Map([["SKILL.md", "# Demo"], ["a.py", "a\n".repeat(150)], ["b.py", "b\n".repeat(150)], ["c.py", "c\n".repeat(150)]]);
+		const p = buildPayload(files, 400, 25);
+		expect(p.parts.length).toBeGreaterThan(1);
+		for (const part of p.parts) {
+			expect(part.text.startsWith("### FILE: SKILL.md\n# Demo")).toBe(true);
+			expect(part.text.length).toBeLessThanOrEqual(400);
+		}
+		for (const ch of ["a", "b", "c"]) expect(all(p).split(`${ch}\n`).length - 1).toBe(150);
+		expect(p.truncated).toBe(false);
+	});
+
+	it("splits one file too large for a part into labelled pieces", () => {
+		const p = buildPayload(new Map([["SKILL.md", "# Demo"], ["big.py", "x = 1\n".repeat(400)]]), 600, 25);
+		expect(p.parts.length).toBeGreaterThan(2);
+		expect(all(p)).toContain("### FILE: big.py (piece 1 of");
+		expect(all(p).split("x = 1\n").length - 1).toBe(400);
+	});
+
+	// The part ceiling only bounds abuse; when it is hit the run must say so, never read as clean.
+	it("marks the run truncated past the part ceiling and names what was not read", () => {
+		const files = new Map([["SKILL.md", "# Demo"], ...Array.from({length: 10}, (_, i) => [`f${i}.py`, "y".repeat(300)] as [string, string])]);
+		const p = buildPayload(files, 400, 3);
+		expect(p.parts).toHaveLength(3);
 		expect(p.truncated).toBe(true);
-		expect(p.omittedPaths).toContain("b.py");
+		expect(p.omittedPaths).toContain("f9.py");
 	});
 
 	it("prefers the shallowest SKILL.md", () => {
-		const p = buildPayload(new Map([["nested/deep/SKILL.md", "deep"], ["SKILL.md", "top"]]), 10_000);
+		const p = buildPayload(new Map([["nested/deep/SKILL.md", "deep"], ["SKILL.md", "top"]]), 10_000, 25);
 		expect(p.includedPaths[0]).toBe("SKILL.md");
 	});
 });

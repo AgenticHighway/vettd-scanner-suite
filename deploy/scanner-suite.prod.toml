@@ -43,4 +43,5 @@ enabled = true
 model = "typesafe/jev-1.13"
 timeout_ms = 45000
 margin_threshold = 0.5
-max_payload_chars = 100000
+part_chars = 400000
+max_parts = 25

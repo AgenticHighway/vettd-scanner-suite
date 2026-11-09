@@ -1,5 +1,5 @@
-// System 1: a model-based scan that judges what regex cannot (intent, scope, clarity). One call
-// asks every typed question over the skill's SKILL.md + scripts; safety findings that clearly fired
+// System 1: a model-based scan that judges what regex cannot (intent, scope, clarity). One call per
+// part asks every typed question over the skill's text (every text file, split to fit one call); safety findings that clearly fired
 // (probability margin, not a bare plurality) go to a second call that returns an overall severity.
 // Design record: vettd docs/system1-scanner.md.
 
@@ -8,9 +8,9 @@ import type {ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanne
 import {logger} from "../logger.js";
 import {evaluateStage1, type RuleEvaluation} from "./evaluate.js";
 import {findingText, mapEvaluations} from "./map.js";
-import {buildPayload, skillNameFromPayload} from "./payload.js";
+import {buildPayload, hasSkillContent, skillNameFromPayload} from "./payload.js";
 import {SAFETY_RULES, SYSTEM1_RULES} from "./rules.js";
-import {type AggregateVerdict, type DecisionConnector, errorCode, SYSTEM1_SOURCE_ID} from "./types.js";
+import {type AggregateVerdict, type DecisionConnector, type DecisionResponse, type DecisionUsage, errorCode, SYSTEM1_SOURCE_ID} from "./types.js";
 
 const MODULE = "external-scanners.system1";
 
@@ -25,6 +25,21 @@ function verdictFromSeverities(severities: string[]): "pass" | "warn" | "fail" {
 	if (severities.some((s) => s === "critical" || s === "high")) return "fail";
 	if (severities.some((s) => s === "medium" || s === "low")) return "warn";
 	return "pass";
+}
+
+/**
+ * One evaluation per rule across parts. A finding rule takes the part where it leans fired most, so
+ * it fires if it fires anywhere. A classification judges the instructions, so it takes the first
+ * part, which holds SKILL.md.
+ */
+export function mergeParts(parts: RuleEvaluation[][]): RuleEvaluation[] {
+	if (parts.length === 1) return parts[0];
+	return parts[0].map((first) => {
+		if (first.rule.kind === "classification") return first;
+		return parts
+			.map((p) => p.find((e) => e.rule.key === first.rule.key) ?? first)
+			.reduce((best, e) => (e.margin > best.margin ? e : best));
+	});
 }
 
 const VERDICT_RANK = {pass: 0, warn: 1, fail: 2} as const;
@@ -62,28 +77,42 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 			const scannedAt = new Date();
 			if (!connector.available()) return emptyRun("skipped", startedAt, scannedAt, "decision API key is not set");
 
-			const payload = buildPayload(input.textFiles, cfg.maxPayloadChars);
-			if (payload.includedPaths.length === 0) {
+			if (!hasSkillContent(input.textFiles)) {
 				return emptyRun("skipped", startedAt, scannedAt, "no SKILL.md or scripts to analyze");
 			}
+			const payload = buildPayload(input.textFiles, cfg.partChars, cfg.maxParts);
 			const skillName = skillNameFromPayload(input.textFiles);
-			logger.info({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, payloadChars: payload.text.length, truncated: payload.truncated}, "system1 scanner run started");
+			logger.info({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, payloadChars: payload.chars, parts: payload.parts.length, truncated: payload.truncated}, "system1 scanner run started");
 
-			let stage1Response;
-			try {
-				stage1Response = await connector.askRules(skillName, payload.text, SYSTEM1_RULES);
-			} catch (err) {
-				const code = errorCode(err);
-				logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 rule scan failed");
-				return emptyRun(code === "timeout" ? "timeout" : "errored", startedAt, scannedAt, code);
+			// One call per part, in order. Any failed or incomplete part fails the run: a part that was
+			// never judged would otherwise read as "nothing found" in it.
+			const answered: {response: DecisionResponse; evaluations: RuleEvaluation[]}[] = [];
+			for (const [index, part] of payload.parts.entries()) {
+				let response: DecisionResponse;
+				try {
+					response = await connector.askRules(skillName, part.text, SYSTEM1_RULES);
+				} catch (err) {
+					const code = errorCode(err);
+					logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code, part: index + 1}, "system1 rule scan failed");
+					return emptyRun(code === "timeout" ? "timeout" : "errored", startedAt, scannedAt, code);
+				}
+				const {evaluations: partEvaluations, unanswered} = evaluateStage1(response, cfg.marginThreshold);
+				if (unanswered.length > 0) {
+					logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, unanswered: unanswered.length, part: index + 1}, "system1 answered incompletely");
+					return emptyRun("errored", startedAt, scannedAt, `system1 answered ${partEvaluations.length} of ${SYSTEM1_RULES.length} rule questions`);
+				}
+				answered.push({response, evaluations: partEvaluations});
 			}
-
-			const {evaluations, unanswered} = evaluateStage1(stage1Response, cfg.marginThreshold);
-			// A partial answer set would read as "nothing found" for the missing rules; fail instead.
-			if (unanswered.length > 0) {
-				logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, unanswered: unanswered.length}, "system1 answered incompletely");
-				return emptyRun("errored", startedAt, scannedAt, `system1 answered ${evaluations.length} of ${SYSTEM1_RULES.length} rule questions`);
-			}
+			const evaluations = mergeParts(answered.map((a) => a.evaluations));
+			const stage1Response = answered[0].response;
+			const stage1Usage = answered.reduce(
+				(sum, a) => ({
+					input_tokens: (sum.input_tokens ?? 0) + (a.response.usage?.input_tokens ?? 0),
+					output_tokens: (sum.output_tokens ?? 0) + (a.response.usage?.output_tokens ?? 0),
+					cost: (sum.cost ?? 0) + (a.response.usage?.cost ?? 0),
+				}),
+				{} as DecisionUsage,
+			);
 			const {findings, signals} = mapEvaluations(evaluations, cfg.model, scannedAt.toISOString());
 
 			// Stage 2 sees only fired safety findings; with none, the aggregate is SAFE by construction.
@@ -139,15 +168,16 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 						marginThreshold: cfg.marginThreshold,
 						aggregateVerdict: verdict,
 						payload: {
-							chars: payload.text.length,
+							chars: payload.chars,
+							parts: payload.parts.map((part, i) => ({paths: part.paths, chars: part.text.length, usage: answered[i]?.response.usage ?? null})),
 							includedPaths: payload.includedPaths,
 							omittedPaths: payload.omittedPaths,
 							truncated: payload.truncated,
 							redactions: payload.redactions,
 						},
 						stage1: {
-							usage: stage1Response.usage ?? null,
-							unanswered,
+							usage: stage1Usage,
+							unanswered: [],
 							answers: Object.fromEntries(
 								evaluations.map((e) => [
 									e.rule.key,
@@ -162,7 +192,7 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 							),
 						},
 						stage2,
-						totalCost: (stage1Response.usage?.cost ?? 0) + stage2Cost,
+						totalCost: (stage1Usage.cost ?? 0) + stage2Cost,
 					},
 					durationMs: duration,
 					scannedAt,

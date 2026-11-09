@@ -54,5 +54,8 @@ model = "typesafe/jev-1.13"
 timeout_ms = 45000
 # A rule fires only when P(fired) - P(none) >= this. 0.5 means P(fired) >= 0.75.
 margin_threshold = 0.5
-# Cap on the skill text sent, in characters.
-max_payload_chars = 100000
+# Every text file is read. Characters per model call (one call takes about 250k tokens); larger
+# skills are split into parts and a rule fires if it fires in any part.
+part_chars = 400000
+# Abuse ceiling: past this many parts the run is marked truncated.
+max_parts = 25
