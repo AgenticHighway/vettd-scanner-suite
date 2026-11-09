@@ -35,7 +35,8 @@ enabled = true
 model = "typesafe/jev-test"
 timeout_ms = 20000
 margin_threshold = 0.6
-max_payload_chars = 5000
+part_chars = 5000
+max_parts = 4
 `;
 
 describe("parseConfig", () => {
@@ -60,7 +61,8 @@ describe("parseConfig", () => {
 					model: "typesafe/jev-test",
 					timeoutMs: 20000,
 					marginThreshold: 0.6,
-					maxPayloadChars: 5000,
+					partChars: 5000,
+					maxParts: 4,
 				},
 			},
 		});
@@ -80,7 +82,8 @@ describe("parseConfig", () => {
 			model: "typesafe/jev-1.13",
 			timeoutMs: 45000,
 			marginThreshold: 0.5,
-			maxPayloadChars: 100000,
+			partChars: 400000,
+			maxParts: 25,
 		});
 	});
 

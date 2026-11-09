@@ -4,6 +4,7 @@ import {buildAggregateRequest, createOpenRouterConnector} from "../../adapters/j
 import type {System1ScannerConfig} from "../../config/schema.js";
 import type {ScannerInput} from "../../contract/scanner.js";
 import {evaluateStage1} from "../evaluate.js";
+import {buildPayload} from "../payload.js";
 import {SAFETY_RULES, SYSTEM1_RULES} from "../rules.js";
 import {createSystem1Scanner, runVerdictFor} from "../scanner.js";
 import type {DecisionAnswer, DecisionResponse} from "../types.js";
@@ -18,7 +19,8 @@ const CFG: System1ScannerConfig = {
 	model: "typesafe/jev-test",
 	timeoutMs: 1000,
 	marginThreshold: 0.5,
-	maxPayloadChars: 10_000,
+	partChars: 10_000,
+	maxParts: 25,
 };
 
 function scanner() {
@@ -314,6 +316,52 @@ describe("system1 scanner", () => {
 			mockJson(stage1Response({data_exfiltration: answer(0.97)}));
 			mockJson(stage2Response("LOW"));
 			expect((await scanner().scan(input({"SKILL.md": SKILL_MD}))).run.verdict).toBe("warn");
+		});
+	});
+
+	// A skill larger than one call is read in parts; the verdict must cover all of them.
+	describe("multi-part skills", () => {
+		const SMALL = {...CFG, partChars: 400};
+		const files = {"SKILL.md": SKILL_MD, "a.py": "a = 1\n".repeat(60), "b.py": "b = 2\n".repeat(60)};
+		const partCount = buildPayload(new Map(Object.entries(files)), SMALL.partChars, SMALL.maxParts).parts.length;
+		const scan = () => createSystem1Scanner(SMALL, createOpenRouterConnector(SMALL)).scan(input(files));
+		/** One stage-1 response per part; `at` gets `special`, the others are quiet. */
+		const perPart = (special: DecisionResponse, at: number) => {
+			for (let i = 0; i < partCount; i++) mockJson(i === at ? special : stage1Response());
+		};
+
+		it("splits this fixture into several parts", () => {
+			expect(partCount).toBeGreaterThan(1);
+		});
+
+		it("asks every part and fires a rule that only a later part shows", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			perPart(stage1Response({data_exfiltration: answer(0.97)}), partCount - 1);
+			mockJson(stage2Response("CRITICAL"));
+			const out = await scan();
+			expect(mockFetch).toHaveBeenCalledTimes(partCount + 1);
+			expect(out.findings.map((f) => f.ruleId)).toContain("S1-0009");
+			const raw = out.run.rawReport as {payload: {parts: unknown[]; truncated: boolean}};
+			expect(raw.payload.parts).toHaveLength(partCount);
+			expect(raw.payload.truncated).toBe(false);
+		});
+
+		it("takes classifications from the first part, which holds the instructions", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			const opts = ["clear", "underspecified", "ambiguous", "contradictory"];
+			mockJson(stage1Response({instruction_clarity: classAnswer(opts, "clear", 0.9)}));
+			for (let i = 1; i < partCount; i++) mockJson(stage1Response({instruction_clarity: classAnswer(opts, "contradictory", 0.95)}));
+			const out = await scan();
+			expect(out.signals?.find((x) => x.ruleId === "reliability/instruction-clarity")?.valueText).toBe("clear");
+		});
+
+		it("errors the run when any part fails, rather than reading the rest as clean", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response());
+			mockFetch.mockResolvedValueOnce({ok: false, status: 500, json: async () => ({})} as unknown as Response);
+			const out = await scan();
+			expect(out.run.status).toBe("errored");
+			expect(out.findings).toEqual([]);
 		});
 	});
 
