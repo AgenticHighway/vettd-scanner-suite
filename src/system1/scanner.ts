@@ -27,6 +27,12 @@ function verdictFromSeverities(severities: string[]): "pass" | "warn" | "fail" {
 	return "pass";
 }
 
+const VERDICT_RANK = {pass: 0, warn: 1, fail: 2} as const;
+
+function capVerdict(v: "pass" | "warn" | "fail", cap: "pass" | "warn" | "fail"): "pass" | "warn" | "fail" {
+	return VERDICT_RANK[v] > VERDICT_RANK[cap] ? cap : v;
+}
+
 function emptyRun(status: string, startedAt: number, scannedAt: Date, error?: string): ScannerOutput {
 	return {
 		findings: [],
@@ -107,7 +113,9 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 			// report a defect, so their severities grade a category but never the run.
 			const defects = signals.filter((s) => s.valueText === undefined);
 			const derived = verdictFromSeverities([...findings, ...defects].map((f) => f.severity ?? "info"));
-			const runVerdict = verdict && firedSafety.length > 0 ? runVerdictFor(verdict) : derived;
+			// The aggregate may judge the whole lower than its parts, never higher: three mediums are
+			// not a HIGH, so its verdict is capped at the one the run's own findings support.
+			const runVerdict = verdict && firedSafety.length > 0 ? capVerdict(runVerdictFor(verdict), derived) : derived;
 
 			const duration = Date.now() - startedAt;
 			logger.info({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, status: "success", duration_ms: duration, fired: evaluations.filter((e) => e.fired).length}, "system1 scanner run completed");
