@@ -297,6 +297,24 @@ describe("system1 scanner", () => {
 			expect(out.signals?.some((s) => s.severity === "medium")).toBe(true);
 			expect(out.run.verdict).toBe("pass");
 		});
+
+		// Seen live: three medium findings and an aggregate of HIGH read as a fail no finding supported.
+		it("never lets the aggregate verdict exceed the run's own findings", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response({undocumented_script_behavior: answer(0.97)}));
+			mockJson(stage2Response("HIGH"));
+			const out = await scanner().scan(input({"SKILL.md": SKILL_MD}));
+			expect(out.findings.every((f) => f.severity === "medium")).toBe(true);
+			expect(out.run.verdict).toBe("warn");
+			expect((out.run.rawReport as {aggregateVerdict: string}).aggregateVerdict).toBe("HIGH");
+		});
+
+		it("still lets the aggregate judge the whole lower than its parts", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			mockJson(stage1Response({data_exfiltration: answer(0.97)}));
+			mockJson(stage2Response("LOW"));
+			expect((await scanner().scan(input({"SKILL.md": SKILL_MD}))).run.verdict).toBe("warn");
+		});
 	});
 
 	// Every surface (API, report.md) shows the basis for a judgment, so it travels on the row.
