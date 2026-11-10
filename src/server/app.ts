@@ -25,6 +25,8 @@ interface SubmitBody {
 	allPaths: string[];
 	bundlePath?: string;
 	repoPaths?: string[];
+	// Scanner ids that must not run for this item (omitted: all enabled scanners run).
+	excludeScanners?: string[];
 }
 
 // Custom content-type parser for application/json. Captures the raw body as a
@@ -45,7 +47,7 @@ function jsonBodyParser(
 	payload.on("error", (err: Error) => done(err, ""));
 }
 
-type ItemValidation = {ok: true; input: ScannerInput} | {ok: false; error: string};
+type ItemValidation = {ok: true; input: ScannerInput; excludeScanners: string[]} | {ok: false; error: string};
 
 // Shared by POST /scans and POST /scans/batch. Takes an already-JSON.parse'd
 // value: the two routes parse different envelopes and need different parse-
@@ -98,6 +100,12 @@ function validateScanItem(parsed: unknown): ItemValidation {
 		}
 	}
 
+	if (body.excludeScanners !== undefined) {
+		if (!Array.isArray(body.excludeScanners) || body.excludeScanners.some((id) => typeof id !== "string")) {
+			return {ok: false, error: "malformed body — 'excludeScanners' must be an array of strings"};
+		}
+	}
+
 	// Size guards. Fail the request immediately — the executor never sees
 	// oversized input, and callers don't poll to find out.
 	if (body.allPaths.length > MAX_FILES) {
@@ -128,6 +136,7 @@ function validateScanItem(parsed: unknown): ItemValidation {
 	return {
 		ok: true,
 		input: {textFiles, allPaths: body.allPaths, bundlePath: body.bundlePath, repoPaths: body.repoPaths},
+		excludeScanners: body.excludeScanners ?? [],
 	};
 }
 
@@ -196,7 +205,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 		}
 
 		try {
-			const job = deps.executor.submit(validation.input);
+			const job = deps.executor.submit(validation.input, validation.excludeScanners);
 			return await reply.code(202).send({jobId: job.id, status: job.status});
 		} catch (err) {
 			if (err instanceof JobStoreFullError) {
@@ -279,7 +288,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 				continue;
 			}
 			try {
-				accepted.push({index, jobId: deps.executor.submit(validation.input).id});
+				accepted.push({index, jobId: deps.executor.submit(validation.input, validation.excludeScanners).id});
 			} catch (err) {
 				// A full job store rejects THIS item only. Siblings already
 				// queued keep running; the caller resubmits just this index.

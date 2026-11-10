@@ -39,6 +39,23 @@ describe("JobExecutor", () => {
 		expect(store.get(job.id)).toBeDefined();
 	});
 
+	it("never invokes or reports a scanner the caller excluded (not merely hidden)", async () => {
+		const store = new InMemoryJobStore();
+		const gated = vi.fn(async () => successOutput("gated"));
+		const available = vi.fn(async () => true);
+		const executor = new JobExecutor({
+			store,
+			scanners: [makeScanner("alpha", async () => successOutput("alpha")), {id: "gated", available, scan: gated}],
+			scannerTimeoutMs: 5000,
+			maxConcurrent: 2,
+		});
+		const job = executor.submit(input, ["gated"]);
+		await executor.idle();
+		expect(store.get(job.id)!.results!.map((r) => r.run.source)).toEqual(["alpha"]);
+		expect(gated).not.toHaveBeenCalled();
+		expect(available).not.toHaveBeenCalled();
+	});
+
 	it("runs a submitted job to completion with results attached", async () => {
 		const store = new InMemoryJobStore();
 		const executor = new JobExecutor({

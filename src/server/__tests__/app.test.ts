@@ -614,4 +614,49 @@ describe("batch concurrency", () => {
 		gated.release("item-2.md");
 		await submitPromise;
 	});
+
+	describe("excludeScanners", () => {
+		function twoScanners() {
+			const gated = vi.fn(async () => fakeOutput("gated"));
+			const scanners: SkillScanner[] = [fakeScanner, {id: "gated", available: async () => true, scan: gated}];
+			return {gated, scanners};
+		}
+
+		it("POST /scans leaves an excluded scanner uncalled and out of the results", async () => {
+			const {gated, scanners} = twoScanners();
+			const {app, store, executor} = makeApp({scanners});
+			const res = await app.inject({method: "POST", url: "/scans", headers: {"content-type": "application/json"}, payload: JSON.stringify({...sampleBody, excludeScanners: ["gated"]})});
+			expect(res.statusCode).toBe(202);
+			await executor.idle();
+			expect(store.get(res.json().jobId)!.results!.map((r) => r.run.source)).toEqual(["fake"]);
+			expect(gated).not.toHaveBeenCalled();
+		});
+
+		it("omitting it runs every enabled scanner as before", async () => {
+			const {gated, scanners} = twoScanners();
+			const {app, store, executor} = makeApp({scanners});
+			const res = await app.inject({method: "POST", url: "/scans", headers: {"content-type": "application/json"}, payload: JSON.stringify(sampleBody)});
+			await executor.idle();
+			expect(store.get(res.json().jobId)!.results).toHaveLength(2);
+			expect(gated).toHaveBeenCalledTimes(1);
+		});
+
+		it("POST /scans/batch applies the exclusion per item", async () => {
+			const {gated, scanners} = twoScanners();
+			const {app, store, executor} = makeApp({scanners});
+			const res = await app.inject({method: "POST", url: "/scans/batch", headers: {"content-type": "application/json"}, payload: JSON.stringify({items: [{...item(1), excludeScanners: ["gated"]}, item(2)]})});
+			expect(res.statusCode).toBe(202);
+			await executor.idle();
+			const [a, b] = res.json().accepted as Array<{jobId: string}>;
+			expect(store.get(a.jobId)!.results!.map((r) => r.run.source)).toEqual(["fake"]);
+			expect(store.get(b.jobId)!.results!.map((r) => r.run.source)).toEqual(["fake", "gated"]);
+			expect(gated).toHaveBeenCalledTimes(1);
+		});
+
+		it("rejects a malformed excludeScanners with 400", async () => {
+			const {app} = makeApp();
+			const res = await app.inject({method: "POST", url: "/scans", headers: {"content-type": "application/json"}, payload: JSON.stringify({...sampleBody, excludeScanners: "gated"})});
+			expect(res.statusCode).toBe(400);
+		});
+	});
 });
