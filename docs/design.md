@@ -85,7 +85,7 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
                                   └──▶ failed (infrastructure error only)
 ```
 
-- Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`.
+- Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`. An optional `excludeScanners: string[]` (on a single body or on each batch item) names scanner ids that must not run for that job: they are never invoked and produce no result. Omitted runs every enabled scanner. The caller uses it to withhold content from a model-backed scanner (System 1) when the user has not consented.
 - The job store is **in-memory behind the narrow `JobStore` interface**
   (`create`/`get`/`transition`/`attachResults`) — the seam for a future
   durable store (SQS/DB). A restart loses jobs; callers see a 404 on poll and

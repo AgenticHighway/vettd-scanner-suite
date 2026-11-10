@@ -23,10 +23,14 @@ export class JobExecutor {
 
 	constructor(private readonly deps: JobExecutorDeps) {}
 
-	/** Creates a job, schedules the scan, returns immediately. */
-	submit(input: ScannerInput): ScanJob {
+	/**
+	 * Creates a job, schedules the scan, returns immediately. `excludeScanners` names scanner ids
+	 * that must not run for this job at all (not run and hidden): the caller decides, e.g. no
+	 * consent to send content to a model provider. Omitted behaves as before.
+	 */
+	submit(input: ScannerInput, excludeScanners: readonly string[] = []): ScanJob {
 		const job = this.deps.store.create();
-		void this.runWhenSlotFree(job.id, input);
+		void this.runWhenSlotFree(job.id, input, excludeScanners);
 		return job;
 	}
 
@@ -38,10 +42,10 @@ export class JobExecutor {
 		});
 	}
 
-	private async runWhenSlotFree(jobId: string, input: ScannerInput): Promise<void> {
+	private async runWhenSlotFree(jobId: string, input: ScannerInput, excludeScanners: readonly string[]): Promise<void> {
 		await this.acquire();
 		try {
-			await this.runJob(jobId, input);
+			await this.runJob(jobId, input, excludeScanners);
 		} finally {
 			this.release();
 		}
@@ -72,8 +76,9 @@ export class JobExecutor {
 		}
 	}
 
-	private async runJob(jobId: string, input: ScannerInput): Promise<void> {
-		const {store, scanners, scannerTimeoutMs} = this.deps;
+	private async runJob(jobId: string, input: ScannerInput, excludeScanners: readonly string[]): Promise<void> {
+		const {store, scannerTimeoutMs} = this.deps;
+		const scanners = this.deps.scanners.filter((s) => !excludeScanners.includes(s.id));
 		store.transition(jobId, "running");
 		try {
 			// runScanners never throws by design — per-scanner failures land as
