@@ -98,7 +98,14 @@ function emptyRun(status: string, startedAt: number, scannedAt: Date, error?: st
 	};
 }
 
-export function createSystem1Scanner(cfg: System1ScannerConfig, connector: DecisionConnector): SkillScanner {
+/** Time kept back from the run's hard timeout so a localization cut short still reaches the result. */
+const LOCATE_DEADLINE_SLACK_MS = 2_000;
+
+/**
+ * `runTimeoutMs` is the hard timeout the runner races the whole scan against ([jobs].scanner_timeout_ms).
+ * Localization never runs past it: on expiry the run would be lost with every finding in it.
+ */
+export function createSystem1Scanner(cfg: System1ScannerConfig, connector: DecisionConnector, runTimeoutMs = Infinity): SkillScanner {
 	return {
 		id: SYSTEM1_SOURCE_ID,
 
@@ -150,12 +157,13 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 			// Stage 2 sees only fired safety findings; with none, the aggregate is SAFE by construction.
 			// Locating those findings runs beside it: both need only stage 1's answers.
 			const firedSafety: RuleEvaluation[] = evaluations.filter((e) => e.fired && e.rule.emit === "finding");
+			const budgetMs = Math.min(cfg.locate.budgetMs, startedAt + runTimeoutMs - LOCATE_DEADLINE_SLACK_MS - Date.now());
 			const locating: Promise<LocateReport | null> =
-				cfg.locate.enabled && firedSafety.length > 0
+				cfg.locate.enabled && firedSafety.length > 0 && budgetMs > 0
 					? locateFindings(
 							firedSafety.map((e) => ({evaluation: e, part: Math.max(0, answered.findIndex((a) => a.evaluations.includes(e)))})),
 							payload,
-							{connector, skillName, marginThreshold: cfg.marginThreshold, config: cfg.locate},
+							{connector, skillName, marginThreshold: cfg.marginThreshold, config: {...cfg.locate, budgetMs}},
 						).catch((err: unknown) => {
 							// Locating only adds precision; a bug in it must never cost the run.
 							logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code: errorCode(err)}, "system1 localization failed");

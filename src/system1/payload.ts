@@ -65,6 +65,8 @@ function lineAt(text: string, index: number): number {
 
 export interface Payload {
 	parts: PayloadPart[];
+	/** The most characters one part (one model call) holds. */
+	partChars: number;
 	/** Characters of skill text read, SKILL.md counted once. */
 	chars: number;
 	includedPaths: string[];
@@ -148,7 +150,7 @@ export function buildPayload(textFiles: Map<string, string>, partChars: number, 
 
 	const includedPaths = [...new Set(parts.flatMap((p) => p.paths))];
 	const chars = parts.reduce((n, p) => n + p.text.length, 0) - head.length * Math.max(0, parts.length - 1);
-	return {parts, chars, includedPaths, omittedPaths: [...omitted], truncated: omitted.size > 0, redactions};
+	return {parts, partChars, chars, includedPaths, omittedPaths: [...omitted], truncated: omitted.size > 0, redactions};
 }
 
 export function skillNameFromPayload(textFiles: Map<string, string>): string {

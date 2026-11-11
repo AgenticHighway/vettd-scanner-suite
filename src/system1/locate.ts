@@ -29,6 +29,8 @@ export interface FindingLocation {
 	method: LocationMethod;
 	/** The call cap, time budget or an error stopped narrowing early. */
 	partial?: boolean;
+	/** Neither half of this range fired alone: the evidence spans it, so it is wider than the target. */
+	spans?: boolean;
 	/** method "file-set": every file the evidence spans. */
 	files?: string[];
 }
@@ -53,6 +55,8 @@ export interface LocateAsk {
 	usage: DecisionUsage | null;
 	ms: number;
 	error?: string;
+	/** Rules the model left without a usable answer; treated like a failed call for those rules. */
+	unanswered?: string[];
 }
 
 export interface LocateReport {
@@ -110,7 +114,9 @@ function linesOf(body: string): string[] {
 export function halves(lo: number, hi: number): [[number, number], [number, number]] {
 	const n = hi - lo;
 	const half = Math.ceil(n / 2);
-	const overlap = Math.floor(n * 0.1);
+	// At least one item of overlap whenever each half can still be smaller than the range, so evidence
+	// that sits across the midpoint of a small file list is not cut apart.
+	const overlap = Math.min(Math.max(1, Math.floor(n * 0.1)), n - half - 1);
 	return [
 		[lo, Math.min(hi, lo + half + overlap)],
 		[Math.max(lo, hi - half - overlap), hi],
@@ -128,6 +134,8 @@ export function skillMdView(payload: Payload): FileView | null {
 	let text = head.body;
 	for (const piece of pieces) {
 		if (piece.startLine !== text.split("\n").length) break;
+		// Never rebuild a SKILL.md larger than one call takes; later pieces are still narrowed as files.
+		if (text.length + piece.body.length > payload.partChars) break;
 		text += piece.body;
 	}
 	return {path: head.path, lines: linesOf(text), startLine: 1, isSkillMd: true};
@@ -210,8 +218,9 @@ type Answers = Map<string, Map<string, RuleEvaluation> | null>;
 /** Moves a job one step on its regions' answers. */
 function advance(job: Job, answers: Answers, skillMd: FileView | null, targetLines: number): void {
 	const results = job.asked.map((r) => answers.get(r.key));
-	if (results.some((r) => r === null)) return finish(job, settle(job, true));
 	const evals = results.map((r) => r?.get(job.rule.key));
+	// A failed call, or one that left this rule unanswered, says nothing about where the evidence is.
+	if (evals.some((e) => !e)) return finish(job, settle(job, true));
 	if (job.stage === "skill-md") {
 		const e = evals[0];
 		if (e?.fired) return startLines(job, skillMd as FileView, e.confidence, targetLines);
@@ -224,7 +233,8 @@ function advance(job: Job, answers: Answers, skillMd: FileView | null, targetLin
 	if (!fired) {
 		// Neither half fires alone: the evidence needs both, so the current range is the answer.
 		const whole = job.stage === "files" && job.hi - job.lo >= job.items.length;
-		return finish(job, whole ? {scope: "skill"} : settle(job, false));
+		const narrowest = whole ? undefined : settle(job, false);
+		return finish(job, whole ? {scope: "skill"} : narrowest && {...narrowest, spans: true});
 	}
 	[job.lo, job.hi] = fired.range;
 	job.confidence = fired.e.confidence;
@@ -255,7 +265,7 @@ async function ask(deps: LocateDeps, region: Region, rules: System1Rule[], signa
 	const started = Date.now();
 	try {
 		const response = await deps.connector.askRules(deps.skillName, region.text, rules, signal);
-		const {evaluations} = evaluateRules(response, rules, deps.marginThreshold);
+		const {evaluations, unanswered} = evaluateRules(response, rules, deps.marginThreshold);
 		addUsage(report.usage, response.usage);
 		report.asks.push({
 			region: region.label,
@@ -263,6 +273,7 @@ async function ask(deps: LocateDeps, region: Region, rules: System1Rule[], signa
 			answers: Object.fromEntries(evaluations.map((e) => [e.rule.key, {choice: e.choice, probabilities: e.probabilities, margin: e.margin, fired: e.fired}])),
 			usage: response.usage ?? null,
 			ms: Date.now() - started,
+			...(unanswered.length > 0 ? {unanswered} : {}),
 		});
 		return new Map(evaluations.map((e) => [e.rule.key, e]));
 	} catch (err) {
@@ -274,7 +285,8 @@ async function ask(deps: LocateDeps, region: Region, rules: System1Rule[], signa
 function newJob(target: LocateTarget, payload: Payload, skillMd: FileView | null, targetLines: number): Job {
 	const part = payload.parts[target.part];
 	const head = skillMd && part.sections[0]?.path === skillMd.path ? part.sections[0] : null;
-	const items = part.sections.filter((s) => s.path !== skillMd?.path);
+	// Only the head is context; SKILL.md continuation pieces are content and stay narrowable.
+	const items = part.sections.filter((s) => s !== head);
 	const job: Job = {rule: target.evaluation.rule, stage: "skill-md", head, items, view: null, lo: 0, hi: 0, confidence: target.evaluation.confidence, asked: []};
 	if (!skillMd) startFiles(job, targetLines);
 	return job;
