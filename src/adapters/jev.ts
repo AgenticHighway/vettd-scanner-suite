@@ -36,10 +36,11 @@ const VERDICT_QUESTION = (rulesChecked: number) =>
 		},
 	}) as const;
 
-function questionFor(rule: System1Rule): Record<string, unknown> {
-	if (rule.kind === "score") return {type: "score", instructions: rule.instructions, criteria: rule.levels};
-	if (rule.kind === "classification") return {type: "choice", instructions: rule.instructions, criteria: rule.options};
-	return {type: "choice", instructions: rule.instructions, criteria: {none: rule.none, present: rule.present}};
+/** The wire question is the rule's prompt; the definition fields are never sent. */
+export function questionFor(rule: System1Rule): Record<string, unknown> {
+	if (rule.kind === "score") return {type: "score", instructions: rule.prompt.instructions, criteria: rule.prompt.levels};
+	if (rule.kind === "classification") return {type: "choice", instructions: rule.prompt.instructions, criteria: rule.prompt.options};
+	return {type: "choice", instructions: rule.prompt.instructions, criteria: {none: rule.prompt.none, present: rule.prompt.present}};
 }
 
 export function buildRulesRequest(model: string, skillName: string, payload: string, rules: readonly System1Rule[]): unknown {
