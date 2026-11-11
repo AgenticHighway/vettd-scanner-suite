@@ -17,13 +17,14 @@ import {SYSTEM1_SOURCE_ID} from "./types.js";
 const SCAN_SOURCE_CLASS = "scan";
 
 /**
- * A finding rule's phrase for the aggregate question: its prompt sentence minus the lead-in.
- * Reads the prompt, so tuning round wording reaches the stage-2 evidence too.
+ * A finding rule's phrase for the aggregate question: read from the definition, not the prompt —
+ * stage 2 wants a short, stable phrase per confirmed finding, and tuned prompts get long and stop
+ * starting with the lead-in this strips.
  */
 export function findingText(rule: System1Rule): string {
-	if (rule.kind === "score") return rule.prompt.instructions;
+	if (rule.kind === "score") return rule.instructions;
 	if (rule.kind === "classification") return rule.summary;
-	return rule.prompt.present.replace(/^The skill package contains /, "").replace(/\.$/, "");
+	return rule.present.replace(/^The skill package contains /, "").replace(/\.$/, "");
 }
 
 /** The basis for one judgment, persisted per row so every surface can show it, not just rawReport. */
