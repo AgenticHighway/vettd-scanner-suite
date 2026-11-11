@@ -37,10 +37,30 @@ export function hasSkillContent(textFiles: Map<string, string>): boolean {
 	return [...textFiles.keys()].some((p) => isSkillMd(p) || rank(p) === 0);
 }
 
+/** One file, or one piece of a file too large for a part, as sent. */
+export interface PayloadSection {
+	path: string;
+	/** The file's (redacted) text in this section, without its `### FILE` header. */
+	body: string;
+	/** Line in the original file where `body` starts (1-based); redaction keeps line numbers. */
+	startLine: number;
+	/** The `### FILE` line that introduced this section. */
+	header: string;
+}
+
 export interface PayloadPart {
 	text: string;
 	/** Files (or file pieces) in this part, SKILL.md included. */
 	paths: string[];
+	/** The sections this part was built from, in order; the SKILL.md head first when there is one. */
+	sections: PayloadSection[];
+}
+
+/** 1-based line of the character at `index`. */
+function lineAt(text: string, index: number): number {
+	let line = 1;
+	for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) line++;
+	return line;
 }
 
 export interface Payload {
@@ -56,16 +76,18 @@ export interface Payload {
 }
 
 /** Splits text into pieces of at most `size` characters, preferring line boundaries. */
-function pieces(text: string, size: number): string[] {
-	const out: string[] = [];
+function pieces(text: string, size: number): {text: string; offset: number}[] {
+	const out: {text: string; offset: number}[] = [];
+	let offset = 0;
 	let rest = text;
 	while (rest.length > size) {
 		const nl = rest.lastIndexOf("\n", size);
 		const cut = nl > size / 2 ? nl + 1 : size;
-		out.push(rest.slice(0, cut));
+		out.push({text: rest.slice(0, cut), offset});
+		offset += cut;
 		rest = rest.slice(cut);
 	}
-	out.push(rest);
+	out.push({text: rest, offset});
 	return out;
 }
 
@@ -81,19 +103,29 @@ export function buildPayload(textFiles: Map<string, string>, partChars: number, 
 	// long SKILL.md is read as ordinary pieces.
 	const skillMd = skillMdPath ? read(skillMdPath) : "";
 	const headBudget = Math.floor(partChars / 4);
-	const head = skillMdPath ? `### FILE: ${skillMdPath}\n${skillMd.slice(0, headBudget)}` : "";
+	const headSection: PayloadSection | null = skillMdPath
+		? {path: skillMdPath, body: skillMd.slice(0, headBudget), startLine: 1, header: `### FILE: ${skillMdPath}`}
+		: null;
+	const head = headSection ? `${headSection.header}\n${headSection.body}` : "";
 	const room = partChars - head.length - 128;
-	const sections: {path: string; text: string}[] = [];
+	const sections: (PayloadSection & {text: string})[] = [];
+	const add = (path: string, header: string, body: string, startLine: number) =>
+		sections.push({path, header, body, startLine, text: `${header}\n${body}`});
 	if (skillMdPath && skillMd.length > headBudget) {
 		const rest = pieces(skillMd.slice(headBudget), room);
-		rest.forEach((t, i) => sections.push({path: skillMdPath, text: `### FILE: ${skillMdPath} (continued, piece ${i + 1} of ${rest.length})\n${t}`}));
+		rest.forEach((t, i) =>
+			add(skillMdPath, `### FILE: ${skillMdPath} (continued, piece ${i + 1} of ${rest.length})`, t.text, lineAt(skillMd, headBudget + t.offset)),
+		);
 	}
 	for (const path of others) {
-		const chunks = pieces(read(path), room);
-		chunks.forEach((t, i) => sections.push({path, text: `### FILE: ${path}${chunks.length > 1 ? ` (piece ${i + 1} of ${chunks.length})` : ""}\n${t}`}));
+		const content = read(path);
+		const chunks = pieces(content, room);
+		chunks.forEach((t, i) =>
+			add(path, `### FILE: ${path}${chunks.length > 1 ? ` (piece ${i + 1} of ${chunks.length})` : ""}`, t.text, lineAt(content, t.offset)),
+		);
 	}
 
-	const fresh = (): PayloadPart => ({text: head, paths: skillMdPath ? [skillMdPath] : []});
+	const fresh = (): PayloadPart => ({text: head, paths: skillMdPath ? [skillMdPath] : [], sections: headSection ? [headSection] : []});
 	const parts: PayloadPart[] = [];
 	let current = fresh();
 	let hasBody = head.length > 0;
@@ -109,6 +141,7 @@ export function buildPayload(textFiles: Map<string, string>, partChars: number, 
 		}
 		current.text = current.text ? `${current.text}\n\n${s.text}` : s.text;
 		if (!current.paths.includes(s.path)) current.paths.push(s.path);
+		current.sections.push({path: s.path, header: s.header, body: s.body, startLine: s.startLine});
 		hasBody = true;
 	}
 	if (parts.length < maxParts && current.text.length > 0) parts.push(current);

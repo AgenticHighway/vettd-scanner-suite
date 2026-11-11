@@ -56,6 +56,17 @@ describe("buildPayload", () => {
 		expect(p.omittedPaths).toContain("f9.py");
 	});
 
+	// System 1 reports a finding's lines against the original file; a piece that forgot where it
+	// started would put every finding in a large file at the wrong line.
+	it("records the original line each section starts at, including later pieces of a split file", () => {
+		const big = Array.from({length: 400}, (_, i) => `line ${i + 1}`).join("\n");
+		const p = buildPayload(new Map([["SKILL.md", "# Demo"], ["big.py", big]]), 600, 25);
+		const pieces = p.parts.flatMap((part) => part.sections).filter((s) => s.path === "big.py");
+		expect(pieces.length).toBeGreaterThan(2);
+		for (const s of pieces) expect(s.body.split("\n")[0]).toBe(`line ${s.startLine}`);
+		expect(p.parts[0].sections[0]).toMatchObject({path: "SKILL.md", startLine: 1});
+	});
+
 	it("prefers the shallowest SKILL.md", () => {
 		const p = buildPayload(new Map([["nested/deep/SKILL.md", "deep"], ["SKILL.md", "top"]]), 10_000, 25);
 		expect(p.includedPaths[0]).toBe("SKILL.md");
@@ -84,6 +95,15 @@ describe("redactSecrets", () => {
 		expect(counts).toEqual({"github-token": 1, "anthropic-key": 1, "aws-key": 1, "slack-token": 1, "private-key": 1, "secret-value": 1});
 		// The key name stays readable: the model can still judge that a credential is hardcoded.
 		expect(out).toContain('password: "[REDACTED:secret-value]"');
+	});
+
+	// A multi-line key collapsing to one line would shift every later line, so located findings
+	// would point at the wrong place in the original file.
+	it("keeps the line count of what it replaces", () => {
+		const text = "a\n-----BEGIN RSA PRIVATE KEY-----\nabc\ndef\n-----END RSA PRIVATE KEY-----\nafter";
+		const out = redactSecrets(text).text;
+		expect(out.split("\n")).toHaveLength(text.split("\n").length);
+		expect(out.split("\n")[5]).toBe("after");
 	});
 
 	it("leaves ordinary code and short values alone", () => {

@@ -21,6 +21,8 @@ const CFG: System1ScannerConfig = {
 	marginThreshold: 0.5,
 	partChars: 10_000,
 	maxParts: 25,
+	// Off here: these tests script every model call; locating has its own tests (locate.test.ts).
+	locate: {enabled: false, targetLines: 30, maxCalls: 60, concurrency: 6, budgetMs: 40_000},
 };
 
 function scanner() {

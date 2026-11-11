@@ -70,8 +70,11 @@ export interface DecisionConnector {
 	/** The model the connector is configured for (before any version pinning). */
 	readonly model: string;
 	available(): boolean;
-	/** One call, one typed question per rule. Throws on transport or protocol failure. */
-	askRules(skillName: string, payload: string, rules: readonly System1Rule[]): Promise<DecisionResponse>;
+	/**
+	 * One call, one typed question per rule. Throws on transport or protocol failure. `signal` aborts
+	 * the call early (localization stops at its own time budget); it then throws a timeout.
+	 */
+	askRules(skillName: string, payload: string, rules: readonly System1Rule[], signal?: AbortSignal): Promise<DecisionResponse>;
 	/** One call: overall severity over only the confirmed safety findings. */
 	aggregate(skillName: string, evidence: AggregateEvidence[], rulesChecked: number): Promise<AggregateResult>;
 }

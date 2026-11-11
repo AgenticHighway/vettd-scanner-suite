@@ -25,6 +25,11 @@ export const DEFAULT_SYSTEM1_MARGIN_THRESHOLD = 0.5;
 export const DEFAULT_SYSTEM1_PART_CHARS = 400_000;
 /** Abuse ceiling only: 25 parts is 10 MB, vettd's own fetch limit for a skill's text. */
 export const DEFAULT_SYSTEM1_MAX_PARTS = 25;
+// Locating fired findings: provisional, to be set from the before/after measurement (vettd#1229).
+export const DEFAULT_SYSTEM1_LOCATE_TARGET_LINES = 30;
+export const DEFAULT_SYSTEM1_LOCATE_MAX_CALLS = 60;
+export const DEFAULT_SYSTEM1_LOCATE_CONCURRENCY = 6;
+export const DEFAULT_SYSTEM1_LOCATE_BUDGET_MS = 40_000;
 
 export interface ServerConfig {
 	host: string;
@@ -82,6 +87,20 @@ export interface System1ScannerConfig {
 	partChars: number;
 	/** Most parts read; past this the run is marked truncated. */
 	maxParts: number;
+	/** Locating fired safety findings by re-asking on smaller regions (vettd#1229). */
+	locate: System1LocateConfig;
+}
+
+export interface System1LocateConfig {
+	enabled: boolean;
+	/** Line narrowing stops at a range this many lines long or shorter. */
+	targetLines: number;
+	/** Most extra model calls one scan may spend on locating. */
+	maxCalls: number;
+	/** Calls in flight at once. */
+	concurrency: number;
+	/** Wall time locating may take; past it, findings keep the narrowest range found so far. */
+	budgetMs: number;
 }
 
 export interface SuiteConfig {

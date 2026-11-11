@@ -10,6 +10,7 @@
 
 import type {AssetFinding, AssetSignal} from "../contract/scanner.js";
 import type {RuleEvaluation} from "./evaluate.js";
+import type {LocateOutcome} from "./locate.js";
 import type {System1Rule, System1Severity} from "./rules.js";
 import {SYSTEM1_SOURCE_ID} from "./types.js";
 
@@ -38,10 +39,19 @@ function severityFor(rule: System1Rule, level: string): System1Severity {
 	return rule.severity;
 }
 
+/** A located finding's file goes to `filepath`; the lines, confidence and method ride in `payload.location`. */
+function locationFields(loc: LocateOutcome | undefined): {filepath?: string; location?: Record<string, unknown>} {
+	if (!loc) return {};
+	if ("scope" in loc) return {location: {scope: loc.scope}};
+	const {filepath, files: _files, ...rest} = loc;
+	return {filepath, location: rest};
+}
+
 export function mapEvaluations(
 	evaluations: RuleEvaluation[],
 	model: string,
 	observedAt: string,
+	locations: Map<string, LocateOutcome> = new Map(),
 ): {findings: AssetFinding[]; signals: AssetSignal[]} {
 	const findings: AssetFinding[] = [];
 	const signals: AssetSignal[] = [];
@@ -86,16 +96,18 @@ export function mapEvaluations(
 				payload: evidence(e, model),
 			});
 		} else {
+			const {filepath, location} = locationFields(locations.get(rule.key));
 			findings.push({
 				category: "security",
 				label,
 				detail,
 				severity,
+				...(filepath ? {filepath} : {}),
 				source: SYSTEM1_SOURCE_ID,
 				ruleId: rule.ruleId,
 				derivation: "inferred",
 				confidence: e.confidence,
-				payload: evidence(e, model),
+				payload: {...evidence(e, model), ...(location ? {location} : {})},
 			});
 		}
 	}

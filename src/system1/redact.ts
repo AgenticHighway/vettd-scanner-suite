@@ -43,7 +43,10 @@ export function redactSecrets(text: string, counts: Record<string, number> = {})
 			// Already-redacted text (an earlier, more specific pattern) is left alone.
 			if (typeof secret !== "string" || secret.startsWith("[REDACTED:")) return match;
 			counts[type] = (counts[type] ?? 0) + 1;
-			return group === 0 ? placeholder : match.replace(secret, placeholder);
+			// Keep the secret's line breaks so every later line keeps its number (System 1 locates
+			// findings by line in this text and reports them against the original file).
+			const kept = placeholder + "\n".repeat(secret.split("\n").length - 1);
+			return group === 0 ? kept : match.replace(secret, kept);
 		});
 	}
 	return {text: out, counts};
