@@ -39,11 +39,14 @@ function severityFor(rule: System1Rule, level: string): System1Severity {
 	return rule.severity;
 }
 
-/** A located finding's file goes to `filepath`; the lines, confidence and method ride in `payload.location`. */
+/**
+ * A located finding's file goes to `filepath`; the lines, confidence and method ride in `payload.location`.
+ * A file set has no `filepath`; its files ride in `payload.location.files`.
+ */
 function locationFields(loc: LocateOutcome | undefined): {filepath?: string; location?: Record<string, unknown>} {
 	if (!loc) return {};
 	if ("scope" in loc) return {location: {scope: loc.scope}};
-	const {filepath, files: _files, ...rest} = loc;
+	const {filepath, ...rest} = loc;
 	return {filepath, location: rest};
 }
 

@@ -20,7 +20,8 @@ import {type DecisionConnector, type DecisionUsage, errorCode} from "./types.js"
 export type LocationMethod = "skill-md" | "narrowed" | "file-set";
 
 export interface FindingLocation {
-	filepath: string;
+	/** Absent for "file-set": no single file carries the evidence, so naming one would mislead. */
+	filepath?: string;
 	lineStart?: number;
 	lineEnd?: number;
 	/** The fired answer's confidence on the reported region. */
@@ -28,7 +29,7 @@ export interface FindingLocation {
 	method: LocationMethod;
 	/** The call cap, time budget or an error stopped narrowing early. */
 	partial?: boolean;
-	/** method "file-set": every file the evidence spans; `filepath` is the first. */
+	/** method "file-set": every file the evidence spans. */
 	files?: string[];
 }
 
@@ -167,10 +168,9 @@ function settle(job: Job, partial: boolean): LocateOutcome | undefined {
 	if (job.stage !== "files" || job.hi - job.lo >= job.items.length) return undefined;
 	const files = [...new Set(job.items.slice(job.lo, job.hi).map((s) => s.path))];
 	return {
-		filepath: files[0],
+		...(files.length === 1 ? {filepath: files[0]} : {files}),
 		confidence: job.confidence,
 		method: files.length === 1 ? "narrowed" : "file-set",
-		...(files.length > 1 ? {files} : {}),
 		...(partial ? {partial} : {}),
 	};
 }
