@@ -92,9 +92,14 @@ export interface Stage1Evaluation {
 }
 
 export function evaluateStage1(response: DecisionResponse, marginThreshold: number): Stage1Evaluation {
+	return evaluateRules(response, SYSTEM1_RULES, marginThreshold);
+}
+
+/** The same evaluation over any subset of rules (localization re-asks only the rules it narrows). */
+export function evaluateRules(response: DecisionResponse, rules: readonly System1Rule[], marginThreshold: number): Stage1Evaluation {
 	const evaluations: RuleEvaluation[] = [];
 	const unanswered: string[] = [];
-	for (const rule of SYSTEM1_RULES) {
+	for (const rule of rules) {
 		const answer = response.answers?.[rule.key];
 		const normalized = answer ? normalizeAnswer(answer) : null;
 		// A classification answer must be one of its own options; anything else is unusable.
