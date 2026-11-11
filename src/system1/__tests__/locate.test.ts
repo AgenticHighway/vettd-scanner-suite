@@ -105,11 +105,13 @@ describe("locateFindings", () => {
 	});
 
 	// A read in one file and a send in another is one finding; narrowing must not pretend either
-	// file alone carries it.
-	it("stops at the smallest file set when the evidence needs two files", async () => {
+	// file alone carries it, so no single filepath is named (a reviewer sent to c.py alone finds nothing).
+	it("stops at the smallest file set when the evidence needs two files, naming no single file", async () => {
 		const payload = skill(eight({c: {10: "secret = read_keys()"}, d: {20: "upload(secret)"}}));
 		const {report} = await locate(payload, {[EXFIL]: ["read_keys()", "upload(secret)"]});
-		expect(report.outcomes.get(EXFIL)).toMatchObject({filepath: "c.py", method: "file-set", files: ["c.py", "d.py"]});
+		const loc = report.outcomes.get(EXFIL) as FindingLocation;
+		expect(loc).toMatchObject({method: "file-set", files: ["c.py", "d.py"]});
+		expect(loc.filepath).toBeUndefined();
 	});
 
 	it("says the evidence is spread across the skill when no half of the files carries it", async () => {
