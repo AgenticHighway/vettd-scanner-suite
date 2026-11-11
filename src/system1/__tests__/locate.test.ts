@@ -75,6 +75,8 @@ describe("halves", () => {
 			expect(b - a).toBeLessThan(n);
 			expect(d - c).toBeLessThan(n);
 			expect(c).toBeLessThanOrEqual(b);
+			// Strict overlap wherever it is possible, so evidence across the midpoint is never cut apart.
+			if (n >= 3) expect(c).toBeLessThan(b);
 		}
 	});
 });
@@ -112,6 +114,14 @@ describe("locateFindings", () => {
 		const loc = report.outcomes.get(EXFIL) as FindingLocation;
 		expect(loc).toMatchObject({method: "file-set", files: ["c.py", "d.py"]});
 		expect(loc.filepath).toBeUndefined();
+	});
+
+	// d.py and e.py sit either side of the first split of eight files; disjoint halves would lose the
+	// pair and report the whole skill.
+	it("keeps a file pair that straddles the first split, and marks the range as spanning", async () => {
+		const payload = skill(eight({d: {10: "secret = read_keys()"}, e: {20: "upload(secret)"}}));
+		const {report} = await locate(payload, {[EXFIL]: ["read_keys()", "upload(secret)"]});
+		expect(report.outcomes.get(EXFIL)).toMatchObject({method: "file-set", files: ["d.py", "e.py"], spans: true});
 	});
 
 	it("says the evidence is spread across the skill when no half of the files carries it", async () => {
@@ -160,6 +170,44 @@ describe("locateFindings", () => {
 		expect(report.outcomes.get(EXFIL)).toMatchObject({partial: true});
 	});
 
+	// A missing answer is not a "no": reading it as one names a confident range nobody confirmed.
+	it("treats a rule the model left unanswered as a failed call, not as did-not-fire", async () => {
+		const payload = skill({"x.py": file(100, {50: "requests.post(URL"})});
+		const {connector} = fakeConnector({});
+		const empty: DecisionConnector = {...connector, askRules: async () => ({answers: {}}) as DecisionResponse};
+		const report = await locateFindings([target(payload, EXFIL, ["requests.post(URL"])], payload, {connector: empty, skillName: "demo", marginThreshold: 0.5, config: CONFIG});
+		expect(report.outcomes.has(EXFIL)).toBe(false);
+		expect(report.asks[0].unanswered).toEqual([EXFIL]);
+	});
+
+	it("stops at the last confirmed range, marked partial, when an answer goes missing mid-narrowing", async () => {
+		const payload = skill(eight({f: {137: "requests.post(URL"}}));
+		const {connector} = fakeConnector({[EXFIL]: ["requests.post(URL"]});
+		let n = 0;
+		const flaky: DecisionConnector = {...connector, askRules: async (...a) => (++n > 3 ? ({answers: {}} as DecisionResponse) : connector.askRules(...a))};
+		const report = await locateFindings([target(payload, EXFIL, ["requests.post(URL"])], payload, {connector: flaky, skillName: "demo", marginThreshold: 0.5, config: CONFIG});
+		expect(report.outcomes.get(EXFIL)).toMatchObject({partial: true});
+	});
+
+	// Continuation pieces of a long SKILL.md are content, not context: evidence that needs one of them
+	// must not be pinned on another file alone.
+	it("keeps SKILL.md continuation pieces in narrowing", async () => {
+		const longMd = SKILL_MD + file(150, {140: "secret = read_keys()"});
+		const payload = buildPayload(new Map([["SKILL.md", longMd], ["x.py", file(10, {5: "upload(secret)"})]]), 4_000, 25);
+		expect(payload.parts[0].sections.some((s) => s.path === "SKILL.md" && s !== payload.parts[0].sections[0])).toBe(true);
+		const {report} = await locate(payload, {[EXFIL]: ["read_keys()", "upload(secret)"]});
+		const loc = report.outcomes.get(EXFIL);
+		expect(loc && "filepath" in loc && loc.filepath === "x.py").toBe(false);
+	});
+
+	// SKILL.md was split to fit one call; the SKILL.md-alone ask must not rebuild it past that.
+	it("never sends a rebuilt SKILL.md larger than one part", async () => {
+		const big = buildPayload(new Map([["SKILL.md", SKILL_MD + file(2_000)], ["x.py", file(10, {5: "requests.post(URL"})]]), 4_000, 25);
+		expect(big.chars).toBeGreaterThan(4 * 4_000);
+		const {calls} = await locate(big, {[EXFIL]: ["requests.post(URL"]});
+		expect(calls[0].text.length).toBeLessThanOrEqual(4_000 + 200);
+	});
+
 	it("leaves a finding unlocated, never throws, when the model fails", async () => {
 		const payload = skill(eight({f: {137: "requests.post(URL"}}));
 		const {report} = await locate(payload, {[EXFIL]: ["requests.post(URL"]}, CONFIG, {fail: () => true});
@@ -204,12 +252,32 @@ describe("System 1 scanner with locating", () => {
 		expect((out.run.rawReport as {localization: {calls: number}}).localization.calls).toBeGreaterThan(0);
 	});
 
-	// Locating adds precision only; failing must not change the finding, the verdict or the status.
+	const input = () => ({textFiles: new Map(Object.entries(files)), allPaths: Object.keys(files)});
+	/** Everything a run reports except where findings are: what locating must never change. */
+	const substance = (out: Awaited<ReturnType<ReturnType<typeof createSystem1Scanner>["scan"]>>) => ({
+		status: out.run.status,
+		verdict: out.run.verdict,
+		findings: out.findings.map(({filepath: _f, payload, ...rest}) => {
+			const {location: _l, ...p} = (payload ?? {}) as Record<string, unknown>;
+			return {...rest, payload: p};
+		}),
+		signals: (out.signals ?? []).map(({observedAt: _o, ...rest}) => rest),
+	});
+
+	// Locating adds precision only; failing must not change the findings, the verdict or the status.
 	it("keeps the run and its findings unchanged when locating fails", async () => {
-		const out = await createSystem1Scanner(CFG, connector(true)).scan({textFiles: new Map(Object.entries(files)), allPaths: Object.keys(files)});
+		const baseline = await createSystem1Scanner({...CFG, locate: {...CONFIG, enabled: false}}, connector(false)).scan(input());
+		const out = await createSystem1Scanner(CFG, connector(true)).scan(input());
+		expect(substance(out)).toEqual(substance(baseline));
+		expect(out.findings.find((x) => x.ruleId === rule(EXFIL).ruleId)!.filepath).toBeUndefined();
+	});
+
+	// The runner races the whole scan against [jobs].scanner_timeout_ms; locating past it would lose
+	// the run and every finding, so locating is skipped when no time is left.
+	it("skips locating rather than run past the scan's hard timeout", async () => {
+		const out = await createSystem1Scanner(CFG, connector(false), 1_000).scan(input());
 		expect(out.run.status).toBe("success");
-		const f = out.findings.find((x) => x.ruleId === rule(EXFIL).ruleId)!;
-		expect(f).toBeDefined();
-		expect(f.filepath).toBeUndefined();
+		expect((out.run.rawReport as {localization?: unknown}).localization).toBeUndefined();
+		expect(out.findings.some((x) => x.ruleId === rule(EXFIL).ruleId)).toBe(true);
 	});
 });
