@@ -8,6 +8,10 @@ import {
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
 	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
+	DEFAULT_SYSTEM1_LOCATE_BUDGET_MS,
+	DEFAULT_SYSTEM1_LOCATE_CONCURRENCY,
+	DEFAULT_SYSTEM1_LOCATE_MAX_CALLS,
+	DEFAULT_SYSTEM1_LOCATE_TARGET_LINES,
 	DEFAULT_SYSTEM1_MAX_PARTS,
 	DEFAULT_SYSTEM1_PART_CHARS,
 	DEFAULT_SYSTEM1_MODEL,
@@ -148,7 +152,10 @@ export function parseConfig(toml: string): SuiteConfig {
 	const system1 = optionalTable(scanners, "system1", "scanners.system1");
 	checkKeys(
 		system1,
-		["enabled", "model", "timeout_ms", "margin_threshold", "part_chars", "max_parts"],
+		[
+			"enabled", "model", "timeout_ms", "margin_threshold", "part_chars", "max_parts",
+			"locate", "locate_target_lines", "locate_max_calls", "locate_concurrency", "locate_budget_ms",
+		],
 		"scanners.system1",
 	);
 
@@ -180,6 +187,13 @@ export function parseConfig(toml: string): SuiteConfig {
 				marginThreshold: readUnitInterval(system1, "margin_threshold", DEFAULT_SYSTEM1_MARGIN_THRESHOLD, "scanners.system1"),
 				partChars: readPositiveInt(system1, "part_chars", DEFAULT_SYSTEM1_PART_CHARS, "scanners.system1"),
 				maxParts: readPositiveInt(system1, "max_parts", DEFAULT_SYSTEM1_MAX_PARTS, "scanners.system1"),
+				locate: {
+					enabled: readBool(system1, "locate", true, "scanners.system1"),
+					targetLines: readPositiveInt(system1, "locate_target_lines", DEFAULT_SYSTEM1_LOCATE_TARGET_LINES, "scanners.system1"),
+					maxCalls: readPositiveInt(system1, "locate_max_calls", DEFAULT_SYSTEM1_LOCATE_MAX_CALLS, "scanners.system1"),
+					concurrency: readPositiveInt(system1, "locate_concurrency", DEFAULT_SYSTEM1_LOCATE_CONCURRENCY, "scanners.system1"),
+					budgetMs: readPositiveInt(system1, "locate_budget_ms", DEFAULT_SYSTEM1_LOCATE_BUDGET_MS, "scanners.system1"),
+				},
 			},
 		},
 	};

@@ -37,6 +37,11 @@ timeout_ms = 20000
 margin_threshold = 0.6
 part_chars = 5000
 max_parts = 4
+locate = false
+locate_target_lines = 20
+locate_max_calls = 10
+locate_concurrency = 2
+locate_budget_ms = 5000
 `;
 
 describe("parseConfig", () => {
@@ -63,6 +68,7 @@ describe("parseConfig", () => {
 					marginThreshold: 0.6,
 					partChars: 5000,
 					maxParts: 4,
+					locate: {enabled: false, targetLines: 20, maxCalls: 10, concurrency: 2, budgetMs: 5000},
 				},
 			},
 		});
@@ -84,6 +90,7 @@ describe("parseConfig", () => {
 			marginThreshold: 0.5,
 			partChars: 400000,
 			maxParts: 25,
+			locate: {enabled: true, targetLines: 30, maxCalls: 60, concurrency: 6, budgetMs: 40_000},
 		});
 	});
 

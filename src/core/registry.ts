@@ -20,7 +20,7 @@ export function buildScanners(config: SuiteConfig): SkillScanner[] {
 	if (config.scanners.cisco.enabled) scanners.push(createCiscoScanner(config.scanners.cisco));
 	if (config.scanners.socket.enabled) scanners.push(createSocketScanner(config.scanners.socket));
 	if (config.scanners.system1.enabled) {
-		scanners.push(createSystem1Scanner(config.scanners.system1, createOpenRouterConnector(config.scanners.system1)));
+		scanners.push(createSystem1Scanner(config.scanners.system1, createOpenRouterConnector(config.scanners.system1), config.jobs.scannerTimeoutMs));
 	}
 	return scanners;
 }

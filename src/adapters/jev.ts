@@ -116,7 +116,8 @@ function cleanResponse(raw: unknown): DecisionResponse {
 	};
 }
 
-async function decide(body: unknown, cfg: System1ScannerConfig, apiKey: string): Promise<DecisionResponse> {
+async function decide(body: unknown, cfg: System1ScannerConfig, apiKey: string, signal?: AbortSignal): Promise<DecisionResponse> {
+	const timeout = AbortSignal.timeout(cfg.timeoutMs);
 	let res: Response;
 	try {
 		res = await fetch(ENDPOINT, {
@@ -125,10 +126,11 @@ async function decide(body: unknown, cfg: System1ScannerConfig, apiKey: string):
 			body: JSON.stringify(body),
 			// A redirect would carry the Authorization header to another host.
 			redirect: "error",
-			signal: AbortSignal.timeout(cfg.timeoutMs),
+			signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
 		});
 	} catch (err) {
-		throw new DecisionError(err instanceof Error && err.name === "TimeoutError" ? "timeout" : "network");
+		const name = err instanceof Error ? err.name : "";
+		throw new DecisionError(name === "TimeoutError" || name === "AbortError" ? "timeout" : "network");
 	}
 	if (!res.ok) {
 		logger.error({module: MODULE, status: res.status}, "decision API HTTP error response");
@@ -148,10 +150,10 @@ export function createOpenRouterConnector(cfg: System1ScannerConfig): DecisionCo
 	return {
 		model: cfg.model,
 		available: () => !!key(),
-		async askRules(skillName, payload, rules) {
+		async askRules(skillName, payload, rules, signal) {
 			const apiKey = key();
 			if (!apiKey) throw new DecisionError("no_key");
-			return decide(buildRulesRequest(cfg.model, skillName, payload, rules), cfg, apiKey);
+			return decide(buildRulesRequest(cfg.model, skillName, payload, rules), cfg, apiKey, signal);
 		},
 		async aggregate(skillName, evidence, rulesChecked): Promise<AggregateResult> {
 			const apiKey = key();

@@ -59,3 +59,11 @@ margin_threshold = 0.5
 part_chars = 400000
 # Abuse ceiling: past this many parts the run is marked truncated.
 max_parts = 25
+# Locating fired safety findings: re-ask on halves of the files, then of the lines, of the text the
+# rule fired on, and report the file and line range that keeps it firing. Costs extra calls only
+# when a safety finding fired; failure never changes the run. Defaults are provisional (vettd#1229).
+locate = true
+locate_target_lines = 30
+locate_max_calls = 60
+locate_concurrency = 6
+locate_budget_ms = 40000

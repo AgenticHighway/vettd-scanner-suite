@@ -7,6 +7,7 @@ import type {System1ScannerConfig} from "../config/schema.js";
 import type {ScannerInput, ScannerOutput, SkillScanner} from "../contract/scanner.js";
 import {logger} from "../logger.js";
 import {evaluateStage1, type RuleEvaluation} from "./evaluate.js";
+import {locateFindings, type LocateReport} from "./locate.js";
 import {findingText, mapEvaluations} from "./map.js";
 import {buildPayload, hasSkillContent, skillNameFromPayload} from "./payload.js";
 import {SAFETY_RULES, SYSTEM1_RULES} from "./rules.js";
@@ -48,6 +49,39 @@ function capVerdict(v: "pass" | "warn" | "fail", cap: "pass" | "warn" | "fail"):
 	return VERDICT_RANK[v] > VERDICT_RANK[cap] ? cap : v;
 }
 
+async function aggregate(
+	connector: DecisionConnector,
+	skillName: string,
+	firedSafety: RuleEvaluation[],
+): Promise<{verdict: AggregateVerdict | null; stage2: Record<string, unknown>; stage2Cost: number}> {
+	if (firedSafety.length === 0) return {verdict: "SAFE", stage2: {skipped: true}, stage2Cost: 0};
+	try {
+		const result = await connector.aggregate(
+			skillName,
+			firedSafety.map((e) => ({rule: e.rule.key, section: e.rule.section, finding: findingText(e.rule)})),
+			SAFETY_RULES.length,
+		);
+		const stage2: Record<string, unknown> = {answer: result.answer, usage: result.usage};
+		if (!result.verdict) stage2.error = "unrecognized verdict choice";
+		return {verdict: result.verdict, stage2, stage2Cost: result.cost};
+	} catch (err) {
+		const code = errorCode(err);
+		logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 aggregate call failed; deriving verdict from findings");
+		return {verdict: null, stage2: {error: code}, stage2Cost: 0};
+	}
+}
+
+/** Every localization ask with its answers, usage and time, so the thresholds can be re-cut offline. */
+function localizationReport(r: LocateReport): Record<string, unknown> {
+	return {
+		calls: r.asks.length,
+		usage: r.usage,
+		...(r.stopped ? {stopped: r.stopped} : {}),
+		outcomes: Object.fromEntries(r.outcomes),
+		asks: r.asks,
+	};
+}
+
 function emptyRun(status: string, startedAt: number, scannedAt: Date, error?: string): ScannerOutput {
 	return {
 		findings: [],
@@ -64,7 +98,14 @@ function emptyRun(status: string, startedAt: number, scannedAt: Date, error?: st
 	};
 }
 
-export function createSystem1Scanner(cfg: System1ScannerConfig, connector: DecisionConnector): SkillScanner {
+/** Time kept back from the run's hard timeout so a localization cut short still reaches the result. */
+const LOCATE_DEADLINE_SLACK_MS = 2_000;
+
+/**
+ * `runTimeoutMs` is the hard timeout the runner races the whole scan against ([jobs].scanner_timeout_ms).
+ * Localization never runs past it: on expiry the run would be lost with every finding in it.
+ */
+export function createSystem1Scanner(cfg: System1ScannerConfig, connector: DecisionConnector, runTimeoutMs = Infinity): SkillScanner {
 	return {
 		id: SYSTEM1_SOURCE_ID,
 
@@ -113,30 +154,24 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 				}),
 				{} as DecisionUsage,
 			);
-			const {findings, signals} = mapEvaluations(evaluations, cfg.model, scannedAt.toISOString());
-
 			// Stage 2 sees only fired safety findings; with none, the aggregate is SAFE by construction.
+			// Locating those findings runs beside it: both need only stage 1's answers.
 			const firedSafety: RuleEvaluation[] = evaluations.filter((e) => e.fired && e.rule.emit === "finding");
-			let verdict: AggregateVerdict | null = firedSafety.length === 0 ? "SAFE" : null;
-			let stage2: Record<string, unknown> = {skipped: firedSafety.length === 0};
-			let stage2Cost = 0;
-			if (firedSafety.length > 0) {
-				try {
-					const result = await connector.aggregate(
-						skillName,
-						firedSafety.map((e) => ({rule: e.rule.key, section: e.rule.section, finding: findingText(e.rule)})),
-						SAFETY_RULES.length,
-					);
-					verdict = result.verdict;
-					stage2Cost = result.cost;
-					stage2 = {answer: result.answer, usage: result.usage};
-					if (!verdict) stage2.error = "unrecognized verdict choice";
-				} catch (err) {
-					const code = errorCode(err);
-					stage2 = {error: code};
-					logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code}, "system1 aggregate call failed; deriving verdict from findings");
-				}
-			}
+			const budgetMs = Math.min(cfg.locate.budgetMs, startedAt + runTimeoutMs - LOCATE_DEADLINE_SLACK_MS - Date.now());
+			const locating: Promise<LocateReport | null> =
+				cfg.locate.enabled && firedSafety.length > 0 && budgetMs > 0
+					? locateFindings(
+							firedSafety.map((e) => ({evaluation: e, part: Math.max(0, answered.findIndex((a) => a.evaluations.includes(e)))})),
+							payload,
+							{connector, skillName, marginThreshold: cfg.marginThreshold, config: {...cfg.locate, budgetMs}},
+						).catch((err: unknown) => {
+							// Locating only adds precision; a bug in it must never cost the run.
+							logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code: errorCode(err)}, "system1 localization failed");
+							return null;
+						})
+					: Promise.resolve(null);
+			const [{verdict, stage2, stage2Cost}, located] = await Promise.all([aggregate(connector, skillName, firedSafety), locating]);
+			const {findings, signals} = mapEvaluations(evaluations, cfg.model, scannedAt.toISOString(), located?.outcomes);
 			// With no safety finding the aggregate says nothing about defect signals, so derive from
 			// findings and finding-shaped signals. Classifications describe the skill rather than
 			// report a defect, so their severities grade a category but never the run.
@@ -192,7 +227,8 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 							),
 						},
 						stage2,
-						totalCost: (stage1Usage.cost ?? 0) + stage2Cost,
+						...(located ? {localization: localizationReport(located)} : {}),
+						totalCost: (stage1Usage.cost ?? 0) + stage2Cost + (located?.usage.cost ?? 0),
 					},
 					durationMs: duration,
 					scannedAt,
