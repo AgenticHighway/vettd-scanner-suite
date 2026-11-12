@@ -285,7 +285,10 @@ const CISCO_TO_VTD: Record<string, string> = {
 	"PDF_STRUCTURAL_THREAT": "VTD-0090",
 	"SOCIAL_ENG_ANTHROPIC_IMPERSONATION": "VTD-0082",
 	"SOCIAL_ENG_MISLEADING_DESC": "VTD-0087",
-	"SOCIAL_ENG_VAGUE_DESCRIPTION": "VTD-0087",
+	// Cisco fires this purely on description length (< min_description_length,
+	// default 20 chars) — a description-quality concern, not the
+	// benign-description-over-malicious-code meaning of VTD-0087.
+	"SOCIAL_ENG_VAGUE_DESCRIPTION": "VTD-0112",
 	"UNANALYZABLE_BINARY": "VTD-0084",
 };
 

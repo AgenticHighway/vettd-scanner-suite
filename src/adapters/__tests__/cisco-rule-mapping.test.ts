@@ -48,4 +48,15 @@ describe("mapCiscoRuleId", () => {
 	it("maps COMPOUND_FETCH_EXECUTE to MALICIOUS_ACTIVITY_CHAIN", () => {
 		expect(mapCiscoRuleId("COMPOUND_FETCH_EXECUTE")).toBe("VTD-0090");
 	});
+
+	it("maps SOCIAL_ENG_VAGUE_DESCRIPTION to the description-brevity rule, not the description-behavior mismatch", () => {
+		// Cisco fires this on description length (< min_description_length),
+		// a description-quality concern — VTD-0087's trojan framing would
+		// misstate it.
+		expect(mapCiscoRuleId("SOCIAL_ENG_VAGUE_DESCRIPTION")).toBe("VTD-0112");
+	});
+
+	it("maps SOCIAL_ENG_MISLEADING_DESC to DESCRIPTION_BEHAVIOR_MISMATCH", () => {
+		expect(mapCiscoRuleId("SOCIAL_ENG_MISLEADING_DESC")).toBe("VTD-0087");
+	});
 });
