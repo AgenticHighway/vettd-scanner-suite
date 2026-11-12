@@ -12,6 +12,9 @@ import type {FindingReviewer, ReviewEntry, ReviewLocation, ReviewTarget} from ".
 
 const MODULE = "review.stage";
 
+/** Slack on top of the reviewer's own budget for the stage's wall-clock backstop. */
+const STAGE_SLACK_MS = 30_000;
+
 /** Fallback stage options when the executor is built without config-provided opts. */
 export const DEFAULT_REVIEW_OPTS: ReviewStageOpts = {
 	sources: ["vettd", "cisco"],
@@ -28,6 +31,8 @@ export interface ReviewStageOpts {
 		maxFindings: number;
 		budgetMs: number;
 	};
+	/** Wall-clock bound for the whole stage (default: the reviewer budget plus slack). */
+	stageTimeoutMs?: number;
 }
 
 interface StagedFinding {
@@ -53,6 +58,41 @@ function attachReport(results: ScannerOutput[], reviewerId: string, report: unkn
 	run.run.rawReport = raw;
 }
 
+/** One reviewer's run, bounded by the stage deadline. A late result is discarded: entries stamped
+ *  after the deadline would mutate findings the caller may already have read. */
+async function boundedReview(
+	reviewer: FindingReviewer,
+	input: ScannerInput,
+	targets: ReviewTarget[],
+	opts: ReviewStageOpts,
+	deadline: number | undefined,
+): Promise<{outcome: Awaited<ReturnType<FindingReviewer["review"]>> | null; timedOut: boolean}> {
+	if (deadline === undefined) {
+		try {
+			return {outcome: await reviewer.review(input, targets, {config: opts.reviewerConfig}), timedOut: false};
+		} catch (err) {
+			logger.error({module: MODULE, reviewer: reviewer.id, err}, "reviewer crashed; findings keep their unreviewed effect");
+			return {outcome: null, timedOut: false};
+		}
+	}
+	let timedOut = false;
+	const reviewPromise = reviewer.review(input, targets, {config: opts.reviewerConfig}).then(
+		(outcome) => (timedOut ? null : outcome),
+		(err) => {
+			if (!timedOut) logger.error({module: MODULE, reviewer: reviewer.id, err}, "reviewer crashed; findings keep their unreviewed effect");
+			return null;
+		},
+	);
+	const timeoutMs = Math.max(0, deadline - Date.now());
+	const timeoutPromise = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
+	const winner = await Promise.race([reviewPromise, timeoutPromise]);
+	if (winner === "timeout") {
+		timedOut = true;
+		return {outcome: null, timedOut: true};
+	}
+	return {outcome: winner, timedOut: false};
+}
+
 /** Run every reviewer over every finding of every result. Mutates findings in place. */
 export async function runReviewers(
 	reviewers: readonly FindingReviewer[],
@@ -70,6 +110,10 @@ export async function runReviewers(
 				staged.push({finding, location, eligible, exempt: eligible && secretsExempt(finding, location, input.textFiles)});
 			}
 		}
+
+		// The stage wall-clock bound: a hung reviewer must not push a scan past its deadline.
+		const stageTimeoutMs = opts.stageTimeoutMs ?? opts.reviewerConfig.budgetMs + STAGE_SLACK_MS;
+		const deadline = reviewers.length > 0 && staged.some((s) => s.eligible && !s.exempt) ? Date.now() + stageTimeoutMs : undefined;
 
 		for (const reviewer of reviewers) {
 			const targets: ReviewTarget[] = [];
@@ -92,11 +136,11 @@ export async function runReviewers(
 				continue;
 			}
 
-			let outcome: Awaited<ReturnType<FindingReviewer["review"]>> | null = null;
-			try {
-				outcome = await reviewer.review(input, targets, {config: opts.reviewerConfig});
-			} catch (err) {
-				logger.error({module: MODULE, reviewer: reviewer.id, err}, "reviewer crashed; findings keep their unreviewed effect");
+			const {outcome, timedOut} = await boundedReview(reviewer, input, targets, opts, deadline);
+			if (timedOut) {
+				logger.error({module: MODULE, reviewer: reviewer.id}, "review exceeded the stage deadline; findings keep their unreviewed effect");
+				for (const t of targets) attach(staged[stagedIndex[t.key]].finding, {reviewer: reviewer.id, status: "failed", reason: "timeout"});
+				continue;
 			}
 			const entries = outcome && outcome.entries.length === targets.length ? outcome.entries : null;
 			for (const t of targets) {

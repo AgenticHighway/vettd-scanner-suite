@@ -100,4 +100,43 @@ describe("runReviewers", () => {
 		expect(system1.payload).toBeUndefined();
 		expect(low.payload).toBeUndefined();
 	});
+
+	it("a hung reviewer is cut off by the stage deadline: findings are stamped within the bound", async () => {
+		const f1 = finding("medium");
+		const f2 = finding("high");
+		const results = [result([f1, f2])];
+		let resolveHang: ((outcome: ReviewOutcome) => void) | undefined;
+		const hang = new Promise<ReviewOutcome>((resolve) => {
+			resolveHang = resolve;
+		});
+		const bounded = {...opts, stageTimeoutMs: 30};
+		const start = Date.now();
+		const stage = runReviewers([reviewer({review: () => hang})], input, results, bounded, []);
+		await new Promise((r) => setTimeout(r, 80)); // let the deadline fire while the review hangs
+		await stage;
+		expect(Date.now() - start).toBeLessThan(5_000);
+		for (const f of [f1, f2]) {
+			expect(f.payload?.reviews).toEqual([{reviewer: "system1", status: "failed", reason: "timeout"}]);
+		}
+		// A late resolution must not reach the findings: the stage already read them.
+		resolveHang?.({entries: [{reviewer: "system1", status: "reviewed", verdict: "not_real"} as ReviewEntry], report: {calls: [], usage: {}}});
+		await new Promise((r) => setTimeout(r, 20));
+		expect(f1.payload?.reviews).toHaveLength(1);
+		expect(f2.payload?.reviews).toHaveLength(1);
+	});
+
+	it("a reviewer error leaves every finding byte-identical apart from the stamped entry", async () => {
+		const f = finding("high", {detail: "Detected in SKILL.md:1 — `x`", confidence: 0.9, intent: "negligent", chainId: "c1", owaspLlmCategory: "LLM01"});
+		f.payload = {model: "m", choice: "present", probabilities: {none: 0.2, present: 0.8}};
+		const before = structuredClone({...f, payload: {...f.payload}});
+		const results = [result([f])];
+		await runReviewers([reviewer({review: async () => {
+			throw new Error("exploded");
+		}})], input, results, opts, []);
+		const after = f as unknown as Record<string, unknown>;
+		expect(after.payload).toEqual({...before.payload, reviews: [{reviewer: "system1", status: "failed", reason: "internal"}]});
+		const {payload: _payload, ...restAfter} = after;
+		const {payload: _payloadBefore, ...restBefore} = before as unknown as Record<string, unknown>;
+		expect(restAfter).toEqual(restBefore);
+	});
 });
