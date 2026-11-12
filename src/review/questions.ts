@@ -237,7 +237,7 @@ export const VALIDITY_OPTIONS: Record<string, string> = {
  *  printed usage/output strings, documentation-only examples) does not. */
 export const VALIDITY_OPTIONS_2: Record<string, string> = {
 	real: "When a user's agent uses this skill as intended, the flagged behavior occurs: code runs, an instruction the skill gives (setup, install or run steps) is followed, or data the skill's code uses is used.",
-	not_executed: "When a user's agent uses this skill as intended, the flagged text affects nothing: it is a comment, purely descriptive text that instructs no one, usage text merely printed to the user, a negative example, or a documentation example the skill never uses. Install or setup instructions the skill gives DO affect what happens and are not inert.",
+	not_executed: "When a user's agent uses this skill as intended, the flagged text affects nothing: it is a comment, purely descriptive text that instructs no one, usage text merely printed to the user, a negative example, a documentation example the skill never uses, or a bare literal the program merely stores in a list or variable without using it to act (a filename in a list of paths to print or check, a pattern in a rules table). Install or setup instructions the skill gives DO affect what happens and are not inert.",
 	not_applicable: "The flagged behavior occurs, but the scanner's rule does not fit it.",
 };
 
