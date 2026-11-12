@@ -79,6 +79,10 @@ const FAMILIES: Record<string, ReviewFamily> = {
 		definition: "Outbound POST with application/octet-stream.",
 		prompt: "Does the cited code actually POST file contents or collected data to a remote host?",
 	},
+	"VTD-0064": {
+		definition: "Prompt instruction override attempt.",
+		prompt: "Does the claimed steering actually happen — is this text prose the agent follows as an instruction to override prior instructions? Quoted example phrases, documentation of injection techniques, and detection payloads shown inside string literals or docstrings are quotes about the behavior, not the behavior: answer not_executed when the claimed instruction is never actually given to the agent.",
+	},
 	"VTD-0076": {
 		definition: "Chat template special token.",
 		prompt: "Is the special token actually used to steer the model, rather than appearing in quoted content, documentation or example text?",
