@@ -34,6 +34,38 @@ function classifyShimError(status: number, body: unknown): string {
 
 // ─── Output shaping ──────────────────────────────────────────────────────────
 
+// SPDX families (word-bounded) that count as a license being *declared*.
+const SPDX_FAMILY = /\b(?:SPDX-License-Identifier|MIT|Apache|BSD|ISC|MPL|AGPL|LGPL|GPL|Unlicense|CC0)\b/i;
+const MARKDOWN_LINK = /\[[^\]]*\]\([^)]*\)/g;
+
+/**
+ * Whether the scanned bundle itself declares a license: a LICENSE file is
+ * present, or a README carries a license section that states the license
+ * inline rather than only linking to a file outside the bundle. A bare
+ * frontmatter "license" absence in that case is a parent-repo question, not a
+ * bundle question, and is handled by the importer. Exported for the
+ * MANIFEST_MISSING_LICENSE post-filter tests and remap tooling.
+ */
+export function bundleDeclaresLicense(files: Record<string, string>): boolean {
+	for (const name of Object.keys(files)) {
+		const base = name.split("/").pop() ?? name;
+		if (/^licen[cs]e(\.|$)/i.test(base)) return true;
+	}
+	for (const [name, content] of Object.entries(files)) {
+		if (!/^readme(\.|$)/i.test(name.split("/").pop() ?? name)) continue;
+		// Split into heading-delimited sections; the leading token of each
+		// section is its heading text.
+		for (const section of content.split(/^#{1,6}\s*/m)) {
+			if (!/^licen[cs]e\b/i.test(section)) continue;
+			// Strip markdown links: a section whose only mention is a link to
+			// a file outside the bundle (e.g. [Apache 2.0](../../LICENSE)) does
+			// not declare anything the bundle carries.
+			if (SPDX_FAMILY.test(section.replace(MARKDOWN_LINK, ""))) return true;
+		}
+	}
+	return false;
+}
+
 interface ShapeOutputArgs {
 	version: string | null;
 	sarifBlob: unknown;
@@ -133,8 +165,10 @@ async function runScanViaShim(cfg: CiscoScannerConfig, input: ScannerInput): Pro
 
 	const sarifBlob = body.sarif ?? null;
 	const version = body.version ?? null;
-	const rawFindings = sarifBlob ? sarifToFindings(sarifBlob) : [];
-	const findings = rawFindings.map((f) => ({...f, ruleId: mapCiscoRuleId(f.ruleId ?? "")}));
+	const rawFindings = sarifBlob ? sarifToFindings(sarifBlob, files) : [];
+	const findings = rawFindings
+		.map((f) => ({...f, ruleId: mapCiscoRuleId(f.ruleId ?? "")}))
+		.filter((f) => f.ruleId !== "MANIFEST_MISSING_LICENSE" || !bundleDeclaresLicense(files));
 	return shapeOutput({version, sarifBlob, findings, runStatus: "success", runError: null, startedAt, scannedAt});
 }
 
