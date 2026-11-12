@@ -200,6 +200,10 @@ const FAMILIES: Record<string, ReviewFamily> = {
 		definition: "Credential dumping tool reference or invocation.",
 		prompt: "Does the skill's code actually invoke or script a credential-dumping tool or API? Discussion or documentation of how the tool works is analysis, not the finding — the finding needs the skill to run or direct the user to run the tool.",
 	},
+	"VTD-0080": {
+		definition: "Base64-encoded content present in the skill's documentation.",
+		prompt: "This rule's claim is presence, not execution: it reports that base64-encoded content appears in the skill's documentation, where it is rarely expected. The finding is real whenever a base64 payload genuinely appears in the skill's text — including an inline data: URI example — because the payload is present in what the agent reads. Answer not_executed only when the cited text contains no actual base64 payload.",
+	},
 	"VTD-0082": {
 		definition: "Skill name resembles a popular skill name (typosquatting).",
 		prompt: "This rule is a factual claim about the skill's metadata, not about executing text: judge whether the skill's declared name really is confusingly close to the popular name the scanner named. If the claim is factually true of this skill, the finding is real.",
