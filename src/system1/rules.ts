@@ -735,9 +735,9 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "compatibility/undeclared-environment-assumptions",
 		key: "undeclared_environment_assumptions",
 		prompt: {
-			instructions: "Do the instructions or scripts assume an operating system, installed tool, harness or network access that the skill never declares?",
-			none: "The skill package does not contain an undeclared assumption about the operating system, installed tools, harness or network access.",
-			present: "The skill package contains an undeclared assumption about the operating system, installed tools, harness or network access.",
+			instructions: "Do the instructions or scripts assume an operating system, installed tool, harness or network access that the skill never declares? A requirement named ANYWHERE in SKILL.md (frontmatter, prose, or setup section) counts as declared; ask only about requirements stated nowhere in the bundle.",
+			none: "Every requirement the skill assumes is named somewhere in SKILL.md.",
+			present: "The skill assumes an OS, tool, harness or network access that it names nowhere.",
 		},
 		summary: "Assumes an OS, tool or network access it never declares",
 		section: "SS12",
@@ -780,10 +780,10 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/usage-context",
 		key: "usage_context",
 		prompt: {
-			instructions: "Does the description tell an agent when to use this skill?",
+			instructions: "Judging ONLY the frontmatter description: does it tell an agent when to use this skill? 'explicit' requires a stated trigger -- 'use when/for ...', a list of situations or request types. A capability list (what the skill can do) counts as 'implied' at most.",
 			options: {
-				"explicit": "The description states when the skill should be used (triggers, situations or request types).",
-				"implied": "The description lets a reader infer when to use the skill but never says so.",
+				"explicit": "The description states when the skill should be used: a trigger ('use when/for'), situations or request types.",
+				"implied": "The description lets a reader infer when to use the skill (e.g. a capability list) but never states a trigger.",
 				"missing": "The description gives no indication of when to use the skill.",
 			},
 		},
@@ -805,9 +805,9 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/example-quality",
 		key: "example_quality",
 		prompt: {
-			instructions: "Does the skill include examples, and do they agree with its instructions?",
+			instructions: "Does the skill include examples, and do they agree with its instructions? Judge the whole bundle: examples may sit in SKILL.md or in any reference doc, and command invocations in examples count as examples.",
 			options: {
-				"none": "The skill includes no examples of its use or expected output.",
+				"none": "The skill includes no examples of its use or expected output, anywhere in the bundle.",
 				"inconsistent": "The skill includes examples that contradict its instructions or could not work as written.",
 				"consistent": "The skill includes examples that agree with its instructions and could work as written.",
 			},
@@ -830,20 +830,22 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/failure-guidance",
 		key: "failure_guidance",
 		prompt: {
-			instructions: "Does the skill say what the agent should do when a step fails?",
+			instructions: "Does the skill tell the agent what to do when a step fails? Guidance means telling the agent what to do when a step fails, in any prose doc in the bundle (SKILL.md or a reference doc); script error strings, exit codes and a tool's own failure threshold do not count. A skill with no procedure to fail (reference or library material) is not_applicable.",
 			options: {
-				"none": "The skill gives no guidance on handling a failed step.",
+				"none": "The skill performs a procedure but gives no guidance on handling a failed step.",
 				"partial": "The skill covers some failure cases but leaves obvious ones open.",
 				"explicit": "The skill says what to do when its main steps fail.",
+				"not_applicable": "The skill is reference or library material with no procedure that can fail.",
 			},
 		},
 		summary: "Failure guidance",
 		section: "SS11",
-		instructions: "Does the skill say what the agent should do when a step fails?",
+		instructions: "Does the skill tell the agent what to do when a step fails?",
 		options: {
 			none: "The skill gives no guidance on handling a failed step.",
 			partial: "The skill covers some failure cases but leaves obvious ones open.",
 			explicit: "The skill says what to do when its main steps fail.",
+			not_applicable: "The skill is reference or library material with no procedure that can fail.",
 		},
 		absent: "none",
 		severityByValue: {none: "low"},
@@ -855,10 +857,12 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/validation-guidance",
 		key: "validation_guidance",
 		prompt: {
-			instructions: "Does the skill tell the agent to check or verify its own output before finishing?",
+			instructions: "Does the skill tell the agent to check or verify its own output before finishing? Judge the whole bundle: guidance may sit in SKILL.md or any reference doc. A skill that produces nothing verifiable (reference or library material) is not_applicable.",
 			options: {
-				"none": "The skill does not tell the agent to verify its work.",
+				"none": "The skill produces an output but never tells the agent to verify it.",
+				"partial": "The skill tells the agent to check some outputs but leaves obvious checks open.",
 				"present": "The skill tells the agent to check or verify its output (a validation or verification step).",
+				"not_applicable": "The skill is reference or library material with no output to verify.",
 			},
 		},
 		summary: "Validation guidance",
@@ -866,10 +870,12 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		instructions: "Does the skill tell the agent to check or verify its own output before finishing?",
 		options: {
 			none: "The skill does not tell the agent to verify its work.",
+			partial: "The skill tells the agent to check some outputs but leaves obvious checks open.",
 			present: "The skill tells the agent to check or verify its output (a validation or verification step).",
+			not_applicable: "The skill is reference or library material with no output to verify.",
 		},
 		absent: "none",
-		severityByValue: {},
+		severityByValue: {none: "low"},
 	},
 	{
 		kind: "classification",
@@ -878,10 +884,12 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/workflow-structure",
 		key: "workflow_structure",
 		prompt: {
-			instructions: "Does the skill lay out its work as an ordered workflow?",
+			instructions: "Does the skill lay out its work as an ordered workflow? A skill with no procedure to order (reference or library material) is not_applicable.",
 			options: {
-				"unstructured": "The skill describes its work as loose prose with no clear order of steps.",
+				"unstructured": "The skill has a procedure but describes it as loose prose with no clear order of steps.",
 				"structured": "The skill lays out an ordered sequence of steps or phases.",
+				"partial": "The skill gives rough phases or a loose list of steps, but no clear order.",
+				"not_applicable": "The skill is reference or library material with no procedure to structure.",
 			},
 		},
 		summary: "Workflow structure",
@@ -890,9 +898,11 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		options: {
 			unstructured: "The skill describes its work as loose prose with no clear order of steps.",
 			structured: "The skill lays out an ordered sequence of steps or phases.",
+			partial: "The skill gives rough phases or a loose list of steps, but no clear order.",
+			not_applicable: "The skill is reference or library material with no procedure to structure.",
 		},
 		absent: "unstructured",
-		severityByValue: {},
+		severityByValue: {unstructured: "low"},
 	},
 	{
 		kind: "classification",
@@ -901,10 +911,12 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		ruleId: "reliability/pitfall-coverage",
 		key: "pitfall_coverage",
 		prompt: {
-			instructions: "Does the skill call out common mistakes, gotchas or known pitfalls?",
+			instructions: "Does the skill call out common mistakes, gotchas or known pitfalls? Judge the whole bundle: pitfalls may sit in SKILL.md or any reference doc.",
 			options: {
-				"none": "The skill does not mention common mistakes or pitfalls.",
+				"none": "The skill performs a task but never mentions common mistakes or pitfalls.",
+				"partial": "The skill calls out one or two gotchas but leaves obvious ones unmentioned.",
 				"present": "The skill calls out common mistakes, gotchas or known pitfalls.",
+				"not_applicable": "The skill is reference or library material with no task to get wrong.",
 			},
 		},
 		summary: "Pitfall coverage",
@@ -912,10 +924,12 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		instructions: "Does the skill call out common mistakes, gotchas or known pitfalls?",
 		options: {
 			none: "The skill does not mention common mistakes or pitfalls.",
+			partial: "The skill calls out one or two gotchas but leaves obvious ones unmentioned.",
 			present: "The skill calls out common mistakes, gotchas or known pitfalls.",
+			not_applicable: "The skill is reference or library material with no task to get wrong.",
 		},
 		absent: "none",
-		severityByValue: {},
+		severityByValue: {none: "low"},
 	},
 ] as const;
 
