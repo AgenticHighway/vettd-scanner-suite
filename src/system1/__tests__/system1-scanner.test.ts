@@ -92,8 +92,9 @@ const idOf = (key: string) => SYSTEM1_RULES.find((r) => r.key === key)!.ruleId;
 describe("system1 rule set", () => {
 	// The safety questions are the model's wire input; a dropped or duplicated row silently changes
 	// what is being asked, and the aggregate call's "rules_checked" would then lie.
-	it("holds 34 safety questions and unique keys and ids", () => {
-		expect(SAFETY_RULES).toHaveLength(34);
+	// S1-0012 is retired (never reused); S1-0035/S1-0036 are the additions after that.
+	it("holds 35 safety questions and unique keys and ids", () => {
+		expect(SAFETY_RULES).toHaveLength(35);
 		expect(new Set(SYSTEM1_RULES.map((r) => r.key)).size).toBe(SYSTEM1_RULES.length);
 		expect(new Set(SYSTEM1_RULES.map((r) => r.ruleId)).size).toBe(SYSTEM1_RULES.length);
 	});
@@ -193,7 +194,7 @@ describe("aggregate request", () => {
 		const body = buildAggregateRequest("m", "demo-skill", [{rule: "prompt_injection", section: "SS2", finding: "a prompt-injection attempt in SKILL.md"}], SAFETY_RULES.length) as {
 			state: Record<string, unknown>;
 		};
-		expect(body.state.rules_checked).toBe(34);
+		expect(body.state.rules_checked).toBe(35);
 		expect(body.state.rules_fired).toBe(1);
 		expect(body.state).not.toHaveProperty("skill_payload");
 	});
