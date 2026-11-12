@@ -111,10 +111,15 @@ function buildDetail(result: SarifResult, line?: number): string {
  * Cisco's YARA scanner computes line numbers against the SKILL.md
  * "instruction body" (frontmatter stripped) but reports the location as the
  * full file, so its line numbers can be offset by the frontmatter length
- * while the snippet text itself is accurate. When the cited line does not
- * contain the snippet but the file does, re-anchor to the snippet's real
- * line. Never rewrites a consistent anchor, and leaves the cited line alone
- * when the snippet cannot be found or no file content is available.
+ * while the snippet text itself is accurate.
+ *
+ * A finding may only move when its snippet unambiguously identifies one
+ * line: a single-line snippet with one occurrence moves; a single-line
+ * snippet with several occurrences moves to the occurrence closest to the
+ * cited line. A multi-line snippet spans several lines and a tied closest
+ * occurrence is genuinely ambiguous — in both cases keep the original cited
+ * line, because collapsing distinct findings onto one line destroys their
+ * distinct anchors.
  */
 function resolveStartLine(
 	result: SarifResult,
@@ -136,9 +141,31 @@ function resolveStartLine(
 	const citedText = lines[citedLine - 1];
 	if (citedText != null && citedText.includes(snippet)) return citedLine;
 
-	const snippetIndex = content.indexOf(snippet);
-	if (snippetIndex === -1) return citedLine;
-	return content.slice(0, snippetIndex).split("\n").length;
+	if (snippet.includes("\n")) return citedLine;
+
+	const occurrences: number[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].includes(snippet)) occurrences.push(i + 1);
+	}
+	if (occurrences.length === 1) return occurrences[0];
+
+	if (occurrences.length > 1) {
+		let best = citedLine;
+		let bestDist = Infinity;
+		let tied = false;
+		for (const line of occurrences) {
+			const dist = Math.abs(line - citedLine);
+			if (dist < bestDist) {
+				best = line;
+				bestDist = dist;
+				tied = false;
+			} else if (dist === bestDist) {
+				tied = true;
+			}
+		}
+		if (!tied) return best;
+	}
+	return citedLine;
 }
 
 function mapResult(

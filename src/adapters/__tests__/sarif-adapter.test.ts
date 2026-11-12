@@ -327,6 +327,149 @@ describe("sarifToFindings", () => {
 		expect(finding.detail).toBe("SKILL.md:3 — msg");
 	});
 
+	it("keeps distinct cited lines for distinct findings sharing a multi-line snippet (docx regression)", () => {
+		// The saved docx SARIF: two findings of the same rule carry the same
+		// multi-line block snippet but cite different SKILL.md lines. The
+		// block occurs once, so first-occurrence re-anchoring collapsed both
+		// findings onto the block's first line. A multi-line snippet can't
+		// identify one line, so the cited lines must be kept.
+		const snippet = [
+			"unzip -q doc.docx -d unpacked/",
+			"find unpacked -type l -delete   # strip symlink entries — docx from external parties is untrusted",
+			"python scripts/merge_runs.py unpacked/   # coalesce fragmented runs so text is findable",
+		].join("\n");
+		const skillMd = [
+			"---",
+			"name: docx",
+			"description: Convert docx documents to PDF.",
+			"---",
+			"",
+			"Zero-pad page numbers (`page-01.jpg`).",
+			"",
+			"## Extract",
+			"",
+			"```bash",
+			...snippet.split("\n"),
+			"```",
+			"",
+			"Afterword.",
+		].join("\n");
+		const makeResult = (cited: number) => ({
+			ruleId: "COMPOUND_EXTRACT_EXECUTE",
+			level: "error",
+			message: {text: "Extract-then-execute"},
+			locations: [
+				{
+					physicalLocation: {
+						artifactLocation: {uri: "SKILL.md"},
+						region: {startLine: cited, snippet: {text: snippet}},
+					},
+				},
+			],
+		});
+		const findings = sarifToFindings(makeSarif([makeResult(6), makeResult(8)]), {"SKILL.md": skillMd});
+		expect(findings).toHaveLength(2);
+		expect(findings[0].detail).toContain("SKILL.md:6 —");
+		expect(findings[1].detail).toContain("SKILL.md:8 —");
+	});
+
+	it("keeps distinct cited lines for shared multi-line script snippets (jira regression)", () => {
+		// The saved jira SARIF: two findings per rule share one multi-line
+		// bash-script snippet while citing different lines inside the file
+		// that contains the script. Both must keep their own citations.
+		const snippet = [
+			"#!/usr/bin/env bash",
+			"# deep-clean.sh — remove all jira-tracker state",
+			"set -euo pipefail",
+		].join("\n");
+		const skillMd = [
+			"---",
+			"name: jira-issue-tracker",
+			"description: Manage jira issues.",
+			"---",
+			"",
+			"## Background jobs",
+			"",
+			"```bash",
+			...snippet.split("\n"),
+			"```",
+			"",
+			"## Cleanup",
+			"",
+			"```bash",
+			...snippet.split("\n"),
+			"```",
+		].join("\n");
+		const makeResult = (cited: number) => ({
+			ruleId: "COMPOUND_FIND_EXEC",
+			level: "error",
+			message: {text: "find -exec pattern"},
+			locations: [
+				{
+					physicalLocation: {
+						artifactLocation: {uri: "SKILL.md"},
+						region: {startLine: cited, snippet: {text: snippet}},
+					},
+				},
+			],
+		});
+		const findings = sarifToFindings(makeSarif([makeResult(6), makeResult(11)]), {"SKILL.md": skillMd});
+		expect(findings).toHaveLength(2);
+		expect(findings[0].detail).toContain("SKILL.md:6 —");
+		expect(findings[1].detail).toContain("SKILL.md:11 —");
+	});
+
+	it("moves to the occurrence closest to the cited line when a single-line snippet occurs several times", () => {
+		// Two findings share a one-line snippet that occurs twice; each must
+		// anchor to the occurrence nearest its own cited line so distinct
+		// findings keep distinct lines.
+		const result = (cited: number) => ({
+			ruleId: "R",
+			level: "warning",
+			message: {text: "msg"},
+			locations: [
+				{
+					physicalLocation: {
+						artifactLocation: {uri: "SKILL.md"},
+						region: {startLine: cited, snippet: {text: "run scripts/sync.py"}},
+					},
+				},
+			],
+		});
+		const skillMd = [
+			"intro",
+			"run scripts/sync.py",
+			"middle",
+			"middle",
+			"middle",
+			"middle",
+			"run scripts/sync.py",
+			"tail",
+		].join("\n");
+		const findings = sarifToFindings(makeSarif([result(3), result(8)]), {"SKILL.md": skillMd});
+		expect(findings[0].detail).toContain("SKILL.md:2 —");
+		expect(findings[1].detail).toContain("SKILL.md:7 —");
+	});
+
+	it("keeps the cited line when the closest occurrence is ambiguous (tie)", () => {
+		const result = {
+			ruleId: "R",
+			level: "warning",
+			message: {text: "msg"},
+			locations: [
+				{
+					physicalLocation: {
+						artifactLocation: {uri: "SKILL.md"},
+						region: {startLine: 5, snippet: {text: "run scripts/sync.py"}},
+					},
+				},
+			],
+		};
+		const skillMd = ["", "", "", "run scripts/sync.py", "middle", "run scripts/sync.py"].join("\n");
+		const [finding] = sarifToFindings(makeSarif([result]), {"SKILL.md": skillMd});
+		expect(finding.detail).toContain("SKILL.md:5 —");
+	});
+
 	it("prepends file without line when region is absent", () => {
 		const result = {
 			ruleId: "R",
