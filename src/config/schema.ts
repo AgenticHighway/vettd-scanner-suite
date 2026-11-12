@@ -8,6 +8,12 @@ export const DEFAULT_SERVER_PORT = 8080;
 export const DEFAULT_MAX_CONCURRENT_JOBS = 2;
 export const DEFAULT_MAX_BATCH_ITEMS = 50;
 export const DEFAULT_SCANNER_TIMEOUT_MS = 120_000;
+/**
+ * Total wall-clock budget for one scan job, scanners plus review. vettd polls a submitted job
+ * synchronously with a 90 s deadline (POLL_DEADLINE_MS in vettd's suite-client.ts), so the job
+ * must finish safely inside that; the default leaves a 10 s margin for transport and persist.
+ */
+export const DEFAULT_TOTAL_DEADLINE_MS = 80_000;
 export const DEFAULT_VETTD_SHIM_URL = "http://127.0.0.1:8788";
 export const DEFAULT_CISCO_SHIM_URL = "http://127.0.0.1:8787";
 export const DEFAULT_CISCO_CONCURRENCY = 1;
@@ -31,6 +37,12 @@ export const DEFAULT_SYSTEM1_LOCATE_MAX_CALLS = 60;
 export const DEFAULT_SYSTEM1_LOCATE_CONCURRENCY = 6;
 export const DEFAULT_SYSTEM1_LOCATE_BUDGET_MS = 40_000;
 
+// The review stage: System 1 judges each eligible regex/Cisco finding post-scan.
+export const DEFAULT_REVIEW_SOURCES = ["vettd", "cisco"];
+export const DEFAULT_REVIEW_MIN_SEVERITY = "medium";
+export const DEFAULT_REVIEW_CONTEXT_LINES = 40;
+export const DEFAULT_REVIEW_BUDGET_MS = 60_000;
+
 export interface ServerConfig {
 	host: string;
 	port: number;
@@ -39,6 +51,8 @@ export interface ServerConfig {
 export interface JobsConfig {
 	maxConcurrent: number;
 	scannerTimeoutMs: number;
+	/** Total job wall clock (scanners plus review), bounded so the job fits vettd's 90 s suite poll. */
+	totalDeadlineMs: number;
 	/** Items allowed in one POST /scans/batch submission. */
 	maxBatchItems: number;
 }
@@ -103,6 +117,19 @@ export interface System1LocateConfig {
 	budgetMs: number;
 }
 
+/** The post-scan review of deterministic findings (fp-check). See src/review/. */
+export interface ReviewConfig {
+	enabled: boolean;
+	/** Finding sources eligible for review (regex and Cisco by default). */
+	sources: string[];
+	/** Findings below this severity are not reviewed. */
+	minSeverity: "critical" | "high" | "medium" | "low";
+	/** Context lines either side of a cited line. */
+	contextLines: number;
+	/** Wall time the whole review may take. */
+	budgetMs: number;
+}
+
 export interface SuiteConfig {
 	server: ServerConfig;
 	jobs: JobsConfig;
@@ -112,4 +139,6 @@ export interface SuiteConfig {
 		socket: SocketScannerConfig;
 		system1: System1ScannerConfig;
 	};
+	/** Post-scan review stage; disabled by default like every model-touching scanner. */
+	review: ReviewConfig;
 }

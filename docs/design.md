@@ -407,6 +407,49 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
 4. If it needs a shim: first-party shims live in the scanner's repo;
    third-party shims live in `shims/` here.
 
+## Review stage (`src/review/`)
+
+After all scanners finish, a review stage asks a model reviewer to judge each
+eligible deterministic finding in context: is it real (executed/followed, not
+text), and how severe is it. The stage runs between `runScanners` and
+`store.attachResults` and **never removes or reorders findings** — it only
+appends `payload.reviews` entries to the findings, so a failed review leaves a
+finding counting exactly as it does today.
+
+- **Eligibility** (pure, in the stage): source in `[review].sources` (default
+  `vettd`, `cisco`), severity at or above `min_severity` (default `medium`),
+  `derivation` not `inferred` — System 1 findings are never re-judged by
+  System 1.
+- **Secrets exemption**: rules whose match is secret bytes (`VTD-0001/0002/0003/0027`,
+  Cisco `SECRET_GITHUB_TOKEN`) or whose cited line contains a `[REDACTED:`
+  placeholder after `redactSecrets` are stamped `exempt` and never sent to the
+  model.
+- **Every eligible finding gets an entry** — `reviewed`, `exempt`, `not_run`
+  (`excluded` | `unavailable` | `budget`) or `failed`
+  (`timeout` | `http_error` | `unanswered` | `internal`) — so the record can
+  always say what happened. There is no finding or call cap (amendment 14):
+  every eligible finding is reviewed; only the time budget can stop the stage. Consent: a reviewer whose id is in the job's
+  `excludeScanners` stamps `not_run`/`excluded` and sends nothing, so vettd's
+  consent gate (`excludeScanners: ["system1"]`) covers review with no new switch.
+- **Location**: parsed from the `Detected in <path>:<line>` / `<path>:<line> —`
+  detail prefixes; no line → whole file; no file → whole skill. The model sees
+  the cited line ± `context_lines` (40) through the same `### FILE:` framing and
+  `linesRegion` helper the System 1 localization uses, redacted via
+  `redactSecrets`.
+- **Questions**: two per finding (validity: `real | not_executed | not_applicable`;
+  severity: `critical | high | medium | low`), asked through the decision
+  connector; findings sharing a context window share one call.
+- **Fail-closed**: an unanswered question, an option outside the set, or the
+  `budget_ms` budget stamps `failed`/`not_run` and the finding keeps its effect.
+- **Job deadline**: `[jobs].total_deadline_ms` (default 80 s) bounds the whole job — vettd
+  polls a submitted scan synchronously with a 90 s deadline (`POLL_DEADLINE_MS` in vettd's
+  suite-client), so the job must finish inside it. The review stage receives only the time
+  left before the job deadline (at most its own budget); what does not fit fails closed as
+  `not_run`/`budget`.
+- **Run record**: the reviewer's call log lands on the System 1 run's
+  `rawReport.review` (no new `ScannerRun` source, so "verified" consensus
+  counting is unaffected).
+
 ## Provenance notes
 
 - Orchestration core, cisco/socket adapters, SARIF mapping, and tests were

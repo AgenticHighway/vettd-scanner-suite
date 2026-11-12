@@ -7,6 +7,10 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
+	DEFAULT_REVIEW_BUDGET_MS,
+	DEFAULT_REVIEW_CONTEXT_LINES,
+	DEFAULT_REVIEW_MIN_SEVERITY,
+	DEFAULT_REVIEW_SOURCES,
 	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
 	DEFAULT_SYSTEM1_LOCATE_BUDGET_MS,
 	DEFAULT_SYSTEM1_LOCATE_CONCURRENCY,
@@ -19,6 +23,7 @@ import {
 	DEFAULT_MAX_BATCH_ITEMS,
 	DEFAULT_MAX_CONCURRENT_JOBS,
 	DEFAULT_SCANNER_TIMEOUT_MS,
+	DEFAULT_TOTAL_DEADLINE_MS,
 	DEFAULT_SCAN_TIMEOUT_MS,
 	DEFAULT_SERVER_HOST,
 	DEFAULT_SERVER_PORT,
@@ -80,6 +85,18 @@ function readUnitInterval(table: Record<string, unknown>, key: string, fallback:
 	return value;
 }
 
+type ReviewSeverity = "critical" | "high" | "medium" | "low";
+const SEVERITIES: readonly ReviewSeverity[] = ["critical", "high", "medium", "low"];
+
+function readSeverity(table: Record<string, unknown>, key: string, fallback: ReviewSeverity, ctx: string): ReviewSeverity {
+	const value = table[key];
+	if (value === undefined) return fallback;
+	if (typeof value !== "string" || !SEVERITIES.includes(value as ReviewSeverity)) {
+		throw new ConfigError(`[${ctx}] ${key} must be one of ${SEVERITIES.join(", ")}`);
+	}
+	return value as ReviewSeverity;
+}
+
 function readHost(table: Record<string, unknown>, key: string, fallback: string, ctx: string): string {
 	const value = table[key];
 	if (value === undefined) return fallback;
@@ -128,13 +145,13 @@ export function parseConfig(toml: string): SuiteConfig {
 		throw new ConfigError(`invalid TOML: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	const root = asTable(parsed, "config");
-	checkKeys(root, ["server", "jobs", "scanners"], "top level");
+	checkKeys(root, ["server", "jobs", "scanners", "review"], "top level");
 
 	const server = optionalTable(root, "server", "server");
 	checkKeys(server, ["host", "port"], "server");
 
 	const jobs = optionalTable(root, "jobs", "jobs");
-	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items"], "jobs");
+	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items", "total_deadline_ms"], "jobs");
 
 	const scanners = optionalTable(root, "scanners", "scanners");
 	checkKeys(scanners, ["vettd", "cisco", "socket", "system1"], "scanners");
@@ -159,6 +176,14 @@ export function parseConfig(toml: string): SuiteConfig {
 		"scanners.system1",
 	);
 
+	const review = optionalTable(root, "review", "review");
+	checkKeys(review, ["enabled", "sources", "min_severity", "context_lines", "budget_ms"], "review");
+	const rawSources = review.sources ?? DEFAULT_REVIEW_SOURCES;
+	if (!Array.isArray(rawSources) || rawSources.some((s) => typeof s !== "string")) {
+		throw new ConfigError(`[review] sources must be an array of strings`);
+	}
+	const minSeverity = readSeverity(review, "min_severity", DEFAULT_REVIEW_MIN_SEVERITY, "review");
+
 	return {
 		server: {
 			host: readHost(server, "host", DEFAULT_SERVER_HOST, "server"),
@@ -167,6 +192,7 @@ export function parseConfig(toml: string): SuiteConfig {
 		jobs: {
 			maxConcurrent: readPositiveInt(jobs, "max_concurrent", DEFAULT_MAX_CONCURRENT_JOBS, "jobs"),
 			scannerTimeoutMs: readPositiveInt(jobs, "scanner_timeout_ms", DEFAULT_SCANNER_TIMEOUT_MS, "jobs"),
+			totalDeadlineMs: readPositiveInt(jobs, "total_deadline_ms", DEFAULT_TOTAL_DEADLINE_MS, "jobs"),
 			maxBatchItems: readPositiveInt(jobs, "max_batch_items", DEFAULT_MAX_BATCH_ITEMS, "jobs"),
 		},
 		scanners: {
@@ -195,6 +221,13 @@ export function parseConfig(toml: string): SuiteConfig {
 					budgetMs: readPositiveInt(system1, "locate_budget_ms", DEFAULT_SYSTEM1_LOCATE_BUDGET_MS, "scanners.system1"),
 				},
 			},
+		},
+		review: {
+			enabled: readBool(review, "enabled", false, "review"),
+			sources: rawSources as string[],
+			minSeverity,
+			contextLines: readPositiveInt(review, "context_lines", DEFAULT_REVIEW_CONTEXT_LINES, "review"),
+			budgetMs: readPositiveInt(review, "budget_ms", DEFAULT_REVIEW_BUDGET_MS, "review"),
 		},
 	};
 }

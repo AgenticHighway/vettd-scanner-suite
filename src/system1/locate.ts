@@ -73,12 +73,14 @@ interface FileView {
 	startLine: number;
 	isSkillMd: boolean;
 }
+export type {FileView};
 
 interface Region {
 	key: string;
 	label: string;
 	text: string;
 }
+export type {Region};
 
 type Stage = "skill-md" | "files" | "lines" | "done";
 
@@ -146,7 +148,9 @@ function filesRegion(head: PayloadSection | null, items: PayloadSection[]): Regi
 	return {key: `files:${label}`, label, text: [...(head ? [head] : []), ...items].map(sectionText).join("\n\n")};
 }
 
-function linesRegion(head: PayloadSection | null, view: FileView, lo: number, hi: number): Region {
+/** The framed text for a line range of a file, with the SKILL.md head prepended as context when the
+ *  file is not SKILL.md. Also used by the review stage for its context windows. */
+export function linesRegion(head: PayloadSection | null, view: FileView, lo: number, hi: number): Region {
 	const a = view.startLine + lo;
 	const b = view.startLine + hi - 1;
 	const label = `${view.path}:${a}-${b}`;

@@ -10,6 +10,7 @@ port = 9090
 [jobs]
 max_concurrent = 4
 scanner_timeout_ms = 60000
+total_deadline_ms = 70000
 max_batch_items = 10
 
 [scanners.vettd]
@@ -42,6 +43,13 @@ locate_target_lines = 20
 locate_max_calls = 10
 locate_concurrency = 2
 locate_budget_ms = 5000
+
+[review]
+enabled = true
+sources = ["vettd", "cisco"]
+min_severity = "high"
+context_lines = 20
+budget_ms = 30000
 `;
 
 describe("parseConfig", () => {
@@ -49,7 +57,7 @@ describe("parseConfig", () => {
 		const config = parseConfig(FULL_CONFIG);
 		expect(config).toEqual({
 			server: {host: "0.0.0.0", port: 9090},
-			jobs: {maxConcurrent: 4, scannerTimeoutMs: 60000, maxBatchItems: 10},
+			jobs: {maxConcurrent: 4, scannerTimeoutMs: 60000, totalDeadlineMs: 70000, maxBatchItems: 10},
 			scanners: {
 				vettd: {enabled: true, shimUrl: "http://127.0.0.1:9788", healthTimeoutMs: 1000, scanTimeoutMs: 20000},
 				cisco: {
@@ -71,13 +79,20 @@ describe("parseConfig", () => {
 					locate: {enabled: false, targetLines: 20, maxCalls: 10, concurrency: 2, budgetMs: 5000},
 				},
 			},
+			review: {
+				enabled: true,
+				sources: ["vettd", "cisco"],
+				minSeverity: "high",
+				contextLines: 20,
+				budgetMs: 30000,
+			},
 		});
 	});
 
 	it("applies defaults for an empty config", () => {
 		const config = parseConfig("");
 		expect(config.server).toEqual({host: "127.0.0.1", port: 8080});
-		expect(config.jobs).toEqual({maxConcurrent: 2, scannerTimeoutMs: 120000, maxBatchItems: 50});
+		expect(config.jobs).toEqual({maxConcurrent: 2, scannerTimeoutMs: 120000, totalDeadlineMs: 80000, maxBatchItems: 50});
 		expect(config.scanners.vettd.shimUrl).toBe("http://127.0.0.1:8788");
 		expect(config.scanners.cisco.shimUrl).toBe("http://127.0.0.1:8787");
 		expect(config.scanners.cisco.concurrency).toBe(1);
