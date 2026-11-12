@@ -73,7 +73,7 @@ const FAMILIES: Record<string, ReviewFamily> = {
 	},
 	"YARA_jailbreak_generic": {
 		definition: "Jailbreak-prompt pattern in skill text.",
-		prompt: "First ask whether this skill itself performs jailbreaks — does its code run jailbreak prompts against models, write them into user configs, or ship working jailbreak templates as its purpose? If yes, a jailbreak-pattern hit is real even when the cited line is documentation. Answer not_executed only when the skill does not itself perform jailbreaks and the cited text is purely educational or detection material about patterns (teaching, research references, quoted examples).",
+		prompt: "First ask whether this skill itself performs jailbreaks — does its code run jailbreak prompts against models, write them into user configs, or ship working jailbreak templates as its purpose? If yes, a jailbreak-pattern hit is real even when the cited line is documentation. Second ask whether the matched phrase is actually about LLM jailbreaking at all — a match on an unrelated technical term (a hardware or protocol master key, a crypto key, a database master key) is a rule-fit miss, not a jailbreak: answer not_executed for it — prefer not_executed over not_applicable in that case, since the flagged text is inert as a jailbreak. Otherwise answer not_executed only when the skill does not itself perform jailbreaks and the cited text is purely educational or detection material about patterns (teaching, research references, quoted examples).",
 	},
 	"VTD-0005": {
 		definition: "Cloud credential file access.",
