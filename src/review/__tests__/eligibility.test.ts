@@ -38,6 +38,12 @@ describe("secretsExempt", () => {
 		expect(secretsExempt({...base, ruleId: "VTD-0017", filepath: "a.py"}, {filepath: "a.py", lineStart: 1, lineEnd: 1}, files)).toBe(true);
 	});
 
+	it("exempts a cited line that already contains a redaction placeholder", () => {
+		const alreadyRedacted = new Map<string, string>();
+		alreadyRedacted.set("c.py", "send('[REDACTED:github-token]')");
+		expect(secretsExempt({...base, ruleId: "VTD-0017", filepath: "c.py"}, {filepath: "c.py", lineStart: 1, lineEnd: 1}, alreadyRedacted)).toBe(true);
+	});
+
 	it("does not exempt ordinary code findings", () => {
 		expect(secretsExempt({...base, ruleId: "VTD-0017", filepath: "b.py"}, {filepath: "b.py", lineStart: 1, lineEnd: 1}, files)).toBe(false);
 	});

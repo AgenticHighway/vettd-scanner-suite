@@ -13,6 +13,9 @@ port = 8080
 max_concurrent = 2
 # Per-scanner hard timeout within a job.
 scanner_timeout_ms = 120000
+# Total wall clock for one job (scanners plus review). vettd polls synchronously with a 90 s
+# deadline, so the default leaves a 10 s margin; the review stage gets only what is left.
+total_deadline_ms = 80000
 # Items allowed in one POST /scans/batch submission. A caller's poll deadline
 # must account for worst-case drain time: ceil(items / max_concurrent) x
 # per-job duration — a full batch at the defaults above can take minutes, not

@@ -23,6 +23,7 @@ import {
 	DEFAULT_MAX_BATCH_ITEMS,
 	DEFAULT_MAX_CONCURRENT_JOBS,
 	DEFAULT_SCANNER_TIMEOUT_MS,
+	DEFAULT_TOTAL_DEADLINE_MS,
 	DEFAULT_SCAN_TIMEOUT_MS,
 	DEFAULT_SERVER_HOST,
 	DEFAULT_SERVER_PORT,
@@ -150,7 +151,7 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(server, ["host", "port"], "server");
 
 	const jobs = optionalTable(root, "jobs", "jobs");
-	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items"], "jobs");
+	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items", "total_deadline_ms"], "jobs");
 
 	const scanners = optionalTable(root, "scanners", "scanners");
 	checkKeys(scanners, ["vettd", "cisco", "socket", "system1"], "scanners");
@@ -191,6 +192,7 @@ export function parseConfig(toml: string): SuiteConfig {
 		jobs: {
 			maxConcurrent: readPositiveInt(jobs, "max_concurrent", DEFAULT_MAX_CONCURRENT_JOBS, "jobs"),
 			scannerTimeoutMs: readPositiveInt(jobs, "scanner_timeout_ms", DEFAULT_SCANNER_TIMEOUT_MS, "jobs"),
+			totalDeadlineMs: readPositiveInt(jobs, "total_deadline_ms", DEFAULT_TOTAL_DEADLINE_MS, "jobs"),
 			maxBatchItems: readPositiveInt(jobs, "max_batch_items", DEFAULT_MAX_BATCH_ITEMS, "jobs"),
 		},
 		scanners: {

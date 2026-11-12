@@ -36,6 +36,7 @@ const executor = new JobExecutor({
 	store,
 	scanners,
 	scannerTimeoutMs: config.jobs.scannerTimeoutMs,
+				totalDeadlineMs: config.jobs.totalDeadlineMs,
 	maxConcurrent: config.jobs.maxConcurrent,
 	reviewers: buildReviewers(config),
 	reviewOpts: reviewStageOpts(config),

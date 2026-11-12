@@ -57,7 +57,7 @@ const fakeScanner: SkillScanner = {
 function makeApp() {
 	const store = new InMemoryJobStore();
 	const batches = new BatchIndex();
-	const executor = new JobExecutor({store, scanners: [fakeScanner], scannerTimeoutMs: 5000, maxConcurrent: 2});
+	const executor = new JobExecutor({store, scanners: [fakeScanner], scannerTimeoutMs: 5000, totalDeadlineMs: 80_000, maxConcurrent: 2});
 	return buildApp({store, executor, batches, maxBatchItems: 50});
 }
 

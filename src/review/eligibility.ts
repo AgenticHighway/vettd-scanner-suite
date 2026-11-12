@@ -27,14 +27,17 @@ export function severityAtLeast(severity: AssetFinding["severity"], min: AssetFi
 	return SEVERITY_RANK[severity] >= SEVERITY_RANK[min];
 }
 
-/** Secrets exemption: rule-id list, or the cited line redacts to a placeholder. */
+/** Secrets exemption: rule-id list, or the cited line redacts to a placeholder — including a
+ *  line that already carries a placeholder (redaction is idempotent, so a pre-redacted line
+ *  would not otherwise register as changed). */
 export function secretsExempt(finding: AssetFinding, location: ReviewLocation, textFiles: Map<string, string>): boolean {
 	if (finding.ruleId && SECRET_RULE_IDS.includes(finding.ruleId)) return true;
 	if ("scope" in location) return false;
 	const content = textFiles.get(location.filepath);
 	if (content === undefined) return false;
 	const cited = content.split("\n").slice(location.lineStart - 1, location.lineEnd).join("\n");
-	return redactSecrets(cited).text !== cited;
+	const redacted = redactSecrets(cited).text;
+	return redacted !== cited || cited.includes("[REDACTED:");
 }
 
 /** Source in the configured set, severity at or above the floor, not model-inferred. */

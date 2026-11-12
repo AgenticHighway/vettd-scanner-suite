@@ -10,6 +10,8 @@ export interface JobExecutorDeps {
 	scanners: SkillScanner[];
 	/** Per-scanner hard timeout ([jobs].scanner_timeout_ms). */
 	scannerTimeoutMs: number;
+	/** Total job wall clock ([jobs].total_deadline_ms); the review gets only what is left of it. */
+	totalDeadlineMs: number;
 	/** Jobs running simultaneously ([jobs].max_concurrent). */
 	maxConcurrent: number;
 	/** Post-scan reviewers ([review] config); empty list disables the stage. */
@@ -85,6 +87,7 @@ export class JobExecutor {
 	private async runJob(jobId: string, input: ScannerInput, excludeScanners: readonly string[]): Promise<void> {
 		const {store, scannerTimeoutMs} = this.deps;
 		const scanners = this.deps.scanners.filter((s) => !excludeScanners.includes(s.id));
+		const startAt = Date.now();
 		store.transition(jobId, "running");
 		try {
 			// runScanners never throws by design — per-scanner failures land as
@@ -94,7 +97,8 @@ export class JobExecutor {
 			// payload.reviews and never throws. Reviewers in excludeScanners do not run
 			// (the consent gate reuses the same id-space as scanners).
 			if (this.deps.reviewers?.length) {
-				await runReviewers(this.deps.reviewers, input, results, this.deps.reviewOpts ?? DEFAULT_REVIEW_OPTS, excludeScanners);
+				const opts = {...(this.deps.reviewOpts ?? DEFAULT_REVIEW_OPTS), deadlineAt: startAt + this.deps.totalDeadlineMs};
+				await runReviewers(this.deps.reviewers, input, results, opts, excludeScanners);
 			}
 			store.attachResults(jobId, results);
 			store.transition(jobId, "completed");

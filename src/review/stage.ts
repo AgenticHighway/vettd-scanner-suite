@@ -31,6 +31,9 @@ export interface ReviewStageOpts {
 	};
 	/** Wall-clock bound for the whole stage (default: the reviewer budget plus slack). */
 	stageTimeoutMs?: number;
+	/** The job's total deadline (scanners plus review must fit inside it). The stage reviews
+	 *  with at most the time left before it; anything that does not fit fails closed. */
+	deadlineAt?: number;
 }
 
 interface StagedFinding {
@@ -74,6 +77,7 @@ async function boundedReview(
 		}
 	}
 	let timedOut = false;
+	let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 	const reviewPromise = reviewer.review(input, targets, {config: opts.reviewerConfig}).then(
 		(outcome) => (timedOut ? null : outcome),
 		(err) => {
@@ -82,8 +86,10 @@ async function boundedReview(
 		},
 	);
 	const timeoutMs = Math.max(0, deadline - Date.now());
-	const timeoutPromise = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
-	const winner = await Promise.race([reviewPromise, timeoutPromise]);
+	const timeoutPromise = new Promise<"timeout">((resolve) => {
+		timeoutTimer = setTimeout(() => resolve("timeout"), timeoutMs);
+	});
+	const winner = await Promise.race([reviewPromise, timeoutPromise]).finally(() => clearTimeout(timeoutTimer));
 	if (winner === "timeout") {
 		timedOut = true;
 		return {outcome: null, timedOut: true};
@@ -109,9 +115,20 @@ export async function runReviewers(
 			}
 		}
 
-		// The stage wall-clock bound: a hung reviewer must not push a scan past its deadline.
-		const stageTimeoutMs = opts.stageTimeoutMs ?? opts.reviewerConfig.budgetMs + STAGE_SLACK_MS;
-		const deadline = reviewers.length > 0 && staged.some((s) => s.eligible && !s.exempt) ? Date.now() + stageTimeoutMs : undefined;
+		// The job's total deadline leaves the stage only the time that remains; the stage gets at
+		// most its configured bound. Past the deadline everything eligible fails closed as budget.
+		const remainingMs = opts.deadlineAt !== undefined ? opts.deadlineAt - Date.now() : Infinity;
+		const budgetMs = remainingMs <= 0 ? 0 : Math.min(opts.reviewerConfig.budgetMs, remainingMs);
+		const stageTimeoutMs = opts.stageTimeoutMs ?? budgetMs + STAGE_SLACK_MS;
+		const boundedOpts: ReviewStageOpts = {...opts, reviewerConfig: {...opts.reviewerConfig, budgetMs}};
+		const deadline = reviewers.length > 0 && staged.some((s) => s.eligible && !s.exempt) ? Date.now() + Math.min(stageTimeoutMs, Math.max(0, remainingMs)) : undefined;
+		if (budgetMs <= 0) {
+			// Nothing fits: stamp every non-exempt eligible finding as budget-limited and stop.
+			for (const s of staged) {
+				if (s.eligible && !s.exempt) attach(s.finding, {reviewer: "system1", status: "not_run", reason: "budget"});
+			}
+			return;
+		}
 
 		for (const reviewer of reviewers) {
 			const targets: ReviewTarget[] = [];
@@ -134,7 +151,7 @@ export async function runReviewers(
 				continue;
 			}
 
-			const {outcome, timedOut} = await boundedReview(reviewer, input, targets, opts, deadline);
+			const {outcome, timedOut} = await boundedReview(reviewer, input, targets, boundedOpts, deadline);
 			if (timedOut) {
 				logger.error({module: MODULE, reviewer: reviewer.id}, "review exceeded the stage deadline; findings keep their unreviewed effect");
 				for (const t of targets) attach(staged[stagedIndex[t.key]].finding, {reviewer: reviewer.id, status: "failed", reason: "timeout"});

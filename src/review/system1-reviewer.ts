@@ -67,9 +67,15 @@ function questionFor2(target: ReviewTarget): System1Rule {
 }
 
 function severityQuestion(target: ReviewTarget): System1Rule {
+	// The severity question must identify its own subject: two unrelated findings can share a
+	// region and an original severity, and identical instructions would leave their answers
+	// attributable only by opaque question keys.
+	const family = familyFor(target.finding.ruleId, target.finding.label);
+	const snippet = detailSnippet(target.finding.detail).slice(0, SNIPPET_CAP);
+	const location = "scope" in target.location ? "whole skill" : `${target.location.filepath}:${target.location.lineStart}`;
 	return reviewQuestion(
 		`f${target.key}_severity`,
-		`The scanner rated this finding's severity as ${target.finding.severity}. Assuming the finding is real, is the scanner's severity right, or too high, or too low for the user whose agent runs this skill? The scanner's rating is the default: deviate only when the skill text clearly justifies it.`,
+		`You are rating the severity of one specific scanner finding — rule: ${family.definition} Matched text: "${snippet}" at ${location}. The scanner rated this finding's severity as ${target.finding.severity}. Assuming the finding is real, is the scanner's severity right, or too high, or too low for the user whose agent runs this skill? The scanner's rating is the default: deviate only when the skill text clearly justifies it.`,
 		SEVERITY_OPTIONS,
 	);
 }
@@ -150,20 +156,42 @@ export interface System1Reviewer {
 	review(input: ScannerInput, targets: ReviewTarget[], opts: ReviewOptions): Promise<ReviewOutcome>;
 }
 
-/** The skill's declared identity (amendment 10): name + frontmatter description, so the model can
- *  judge findings against what the skill claims to be, not just against a text window. */
-function skillIdentity(textFiles: Map<string, string>): string {
-	const skillMdKey = [...textFiles.keys()].find((p) => (p.split("/").pop() ?? "").toLowerCase() === "skill.md");
-	const skillMd = skillMdKey ? textFiles.get(skillMdKey) : undefined;
+/** A frontmatter value: the same line's text, or for block scalars the indented block that
+ *  follows (multiline YAML descriptions are common and must not collapse to "|" or ">"). */
+function frontmatterValue(lines: string[], key: string): string {
+	const start = lines.findIndex((l) => l.startsWith(`${key}:`));
+	if (start === -1) return "";
+	const inline = lines[start].slice(key.length + 1).trim();
+	if (inline && inline !== "|" && inline !== ">" && inline !== "|-" && inline !== ">-") {
+		return inline.replace(/^["']|["']$/g, "");
+	}
+	// Block scalar: every following line indented deeper than the key, stopping at the first
+	// non-indented or non-empty shallower line.
+	const out: string[] = [];
+	for (let i = start + 1; i < lines.length; i++) {
+		const line = lines[i];
+		if (line.trim() === "") break;
+		if (!/^\s/.test(line)) break;
+		out.push(line.trim());
+	}
+	return out.join(" ").slice(0, 600);
+}
+
+/** The skill's declared identity (amendment 10): name + frontmatter description from the same
+ *  SKILL.md buildPayload selects (the shallowest), so the model judges findings against what
+ *  the skill claims to be. */
+function skillIdentity(skillMdPath: string | null, textFiles: Map<string, string>): string {
+	const skillMd = skillMdPath ? textFiles.get(skillMdPath) : undefined;
+	let name = "unknown";
 	let description = "";
 	if (skillMd) {
 		const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skillMd);
 		if (frontmatter) {
-			const match = /^description:\s*(.+)$/m.exec(frontmatter[1]);
-			if (match) description = match[1].trim().replace(/^["']|["']$/g, "").slice(0, 600);
+			const lines = frontmatter[1].split(/\r?\n/);
+			name = frontmatterValue(lines, "name") || name;
+			description = frontmatterValue(lines, "description");
 		}
 	}
-	const name = skillMdKey ? (skillMdKey.split("/").slice(0, -1).join("/") || "skill") : "skill";
 	return `### SKILL: ${name}\n### DESCRIPTION: ${description || "(none declared)"}\n\n`;
 }
 
@@ -188,7 +216,7 @@ export function createSystem1Reviewer(cfg: System1ScannerConfig, connector: Deci
 			const skillMd = skillMdView(payload);
 			const head = skillMd ? (payload.parts[0]?.sections.find((s) => s.path === skillMd.path && s.startLine === 1) ?? null) : null;
 			const skillName = skillNameFromPayload(input.textFiles);
-			const identity = skillIdentity(input.textFiles);
+			const identity = skillIdentity(skillMd ? skillMd.path : null, input.textFiles);
 
 			// Targets sharing a region go in one call (locate.ts round() grouping).
 			const groups = new Map<string, {region: Region; targets: {t: ReviewTarget; i: number}[]}>();
@@ -202,7 +230,6 @@ export function createSystem1Reviewer(cfg: System1ScannerConfig, connector: Deci
 			const deadline = Date.now() + opts.config.budgetMs;
 			const controller = new AbortController();
 			const budgetTimer = setTimeout(() => controller.abort(), opts.config.budgetMs);
-			let calls = 0;
 			try {
 				for (const {region, targets: group} of groups.values()) {
 					const stamp = (entry: ReviewEntry) => {
@@ -213,7 +240,6 @@ export function createSystem1Reviewer(cfg: System1ScannerConfig, connector: Deci
 						report.stopped = "budget";
 						continue;
 					}
-					calls++;
 					const started = Date.now();
 					const rules = group.flatMap(({t}) => [questionFor(t), questionFor2(t), severityQuestion(t)]);
 					try {

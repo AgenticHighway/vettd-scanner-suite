@@ -441,6 +441,11 @@ finding counting exactly as it does today.
   connector; findings sharing a context window share one call.
 - **Fail-closed**: an unanswered question, an option outside the set, or the
   `budget_ms` budget stamps `failed`/`not_run` and the finding keeps its effect.
+- **Job deadline**: `[jobs].total_deadline_ms` (default 80 s) bounds the whole job — vettd
+  polls a submitted scan synchronously with a 90 s deadline (`POLL_DEADLINE_MS` in vettd's
+  suite-client), so the job must finish inside it. The review stage receives only the time
+  left before the job deadline (at most its own budget); what does not fit fails closed as
+  `not_run`/`budget`.
 - **Run record**: the reviewer's call log lands on the System 1 run's
   `rawReport.review` (no new `ScannerRun` source, so "verified" consensus
   counting is unaffected).

@@ -8,6 +8,12 @@ export const DEFAULT_SERVER_PORT = 8080;
 export const DEFAULT_MAX_CONCURRENT_JOBS = 2;
 export const DEFAULT_MAX_BATCH_ITEMS = 50;
 export const DEFAULT_SCANNER_TIMEOUT_MS = 120_000;
+/**
+ * Total wall-clock budget for one scan job, scanners plus review. vettd polls a submitted job
+ * synchronously with a 90 s deadline (POLL_DEADLINE_MS in vettd's suite-client.ts), so the job
+ * must finish safely inside that; the default leaves a 10 s margin for transport and persist.
+ */
+export const DEFAULT_TOTAL_DEADLINE_MS = 80_000;
 export const DEFAULT_VETTD_SHIM_URL = "http://127.0.0.1:8788";
 export const DEFAULT_CISCO_SHIM_URL = "http://127.0.0.1:8787";
 export const DEFAULT_CISCO_CONCURRENCY = 1;
@@ -45,6 +51,8 @@ export interface ServerConfig {
 export interface JobsConfig {
 	maxConcurrent: number;
 	scannerTimeoutMs: number;
+	/** Total job wall clock (scanners plus review), bounded so the job fits vettd's 90 s suite poll. */
+	totalDeadlineMs: number;
 	/** Items allowed in one POST /scans/batch submission. */
 	maxBatchItems: number;
 }

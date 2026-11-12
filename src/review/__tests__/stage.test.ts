@@ -125,6 +125,32 @@ describe("runReviewers", () => {
 		expect(f2.payload?.reviews).toHaveLength(1);
 	});
 
+	it("when the scanners use most of the job deadline, the review gets only what is left and stops in time", async () => {
+		const review = vi.fn(async () => ({entries: [], report: {calls: [], usage: {}}}) as unknown as ReviewOutcome);
+		const r = reviewer({review});
+		const f1 = finding("medium");
+		const f2 = finding("high");
+		const results = [result([f1, f2])];
+		// The job deadline is nearly exhausted: the review must not be given its full budget.
+		const expiring = {...opts, deadlineAt: Date.now() - 1}; // the scanners consumed the whole job deadline
+		await runReviewers([r], input, results, expiring, []);
+		expect(f1.payload?.reviews).toEqual([{reviewer: "system1", status: "not_run", reason: "budget"}]);
+		expect(f2.payload?.reviews).toEqual([{reviewer: "system1", status: "not_run", reason: "budget"}]);
+		expect(review).not.toHaveBeenCalled();
+	});
+
+	it("with time left before the deadline, the reviewer's budget shrinks to the remaining time", async () => {
+		const review = vi.fn(async (_i, targets, opts) => {
+			expect(opts.config.budgetMs).toBeLessThanOrEqual(200);
+			return {entries: targets.map(() => ({reviewer: "system1", status: "reviewed"} as ReviewEntry)), report: {calls: [], usage: {}}};
+		});
+		const r = reviewer({review});
+		const f = finding("medium");
+		const results = [result([f])];
+		await runReviewers([r], input, results, {...opts, deadlineAt: Date.now() + 200}, []);
+		expect((f.payload?.reviews as ReviewEntry[])[0]).toMatchObject({status: "reviewed"});
+	});
+
 	it("a reviewer error leaves every finding byte-identical apart from the stamped entry", async () => {
 		const f = finding("high", {detail: "Detected in SKILL.md:1 — `x`", confidence: 0.9, intent: "negligent", chainId: "c1", owaspLlmCategory: "LLM01"});
 		f.payload = {model: "m", choice: "present", probabilities: {none: 0.2, present: 0.8}};

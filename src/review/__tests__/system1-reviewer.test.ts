@@ -158,6 +158,29 @@ describe("createSystem1Reviewer", () => {
 		expect(seen).toContain("untrusted skill content");
 	});
 
+	it("two unrelated findings sharing a region and severity get distinct severity questions", async () => {
+		const seen: string[] = [];
+		const connector: DecisionConnector = {
+			model: "test-model",
+			available: () => true,
+			askRules: async (_s: string, _p: string, rules: readonly import("../../system1/rules.js").System1Rule[]) => {
+				for (const r of rules) if (r.key.endsWith("_severity")) seen.push(r.prompt.instructions);
+				return responseFor({});
+			},
+			aggregate: async () => {
+				throw new Error("unused");
+			},
+		} as unknown as DecisionConnector;
+		const t0 = target(0);
+		const t1 = target(1, {ruleId: "DATA_EXFIL_NETWORK_REQUESTS", label: "Network request exfiltration", detail: "scripts/run.sh:50 — \`send(data)\`"});
+		await createSystem1Reviewer(CFG, connector).review(input, [t0, t1], OPTS);
+		expect(seen).toHaveLength(2);
+		expect(seen[0]).not.toBe(seen[1]); // each severity question names its own finding
+		expect(seen[0]).toContain("eval/exec family");
+		expect(seen[0]).toContain("eval $INPUT"); // its own matched snippet
+		expect(seen[1]).toContain("Network requests flagged as exfiltration"); // the other finding's rule family
+	});
+
 	it("skill-scope findings are judged against part 1 of the payload", async () => {
 		let payload = "";
 		const connector = mockConnector((p) => {
