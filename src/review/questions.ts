@@ -174,7 +174,7 @@ const FAMILIES: Record<string, ReviewFamily> = {
 	},
 	"TOOL_ABUSE_UNDECLARED_NETWORK": {
 		definition: "Undeclared network use.",
-		prompt: "The rule's claim is that the skill uses network tools WITHOUT declaring network use. Judge the claim, not whether a network call executes: when the skill's documentation (SKILL.md, description, prerequisites, data-source or dependency sections) plainly declares the network use — endpoints, network libraries, or a stated purpose that requires the network — the claimed undeclared use never occurs, so answer not_executed. Answer real only when the code really makes network calls that the documentation nowhere declares — a feature description that never mentions network access, fetching over the network, endpoints or URLs does not declare the network use, even if the feature implies data arrives from somewhere; only an explicit statement of network access, endpoints or network libraries counts as declaring it.",
+		prompt: "Does the code actually make the network call when the skill runs, or does the skill's text direct the user/agent to reach that endpoint — rather than merely documenting or stubbing it?",
 	},
 	"COMMAND_INJECTION_EVAL": {
 		definition: "JavaScript eval of potentially untrusted input.",
