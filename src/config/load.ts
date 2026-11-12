@@ -9,8 +9,6 @@ import {
 	DEFAULT_HEALTH_TIMEOUT_MS,
 	DEFAULT_REVIEW_BUDGET_MS,
 	DEFAULT_REVIEW_CONTEXT_LINES,
-	DEFAULT_REVIEW_MAX_CALLS,
-	DEFAULT_REVIEW_MAX_FINDINGS,
 	DEFAULT_REVIEW_MIN_SEVERITY,
 	DEFAULT_REVIEW_SOURCES,
 	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
@@ -178,7 +176,7 @@ export function parseConfig(toml: string): SuiteConfig {
 	);
 
 	const review = optionalTable(root, "review", "review");
-	checkKeys(review, ["enabled", "sources", "min_severity", "context_lines", "max_findings", "max_calls", "budget_ms"], "review");
+	checkKeys(review, ["enabled", "sources", "min_severity", "context_lines", "budget_ms"], "review");
 	const rawSources = review.sources ?? DEFAULT_REVIEW_SOURCES;
 	if (!Array.isArray(rawSources) || rawSources.some((s) => typeof s !== "string")) {
 		throw new ConfigError(`[review] sources must be an array of strings`);
@@ -227,8 +225,6 @@ export function parseConfig(toml: string): SuiteConfig {
 			sources: rawSources as string[],
 			minSeverity,
 			contextLines: readPositiveInt(review, "context_lines", DEFAULT_REVIEW_CONTEXT_LINES, "review"),
-			maxFindings: readPositiveInt(review, "max_findings", DEFAULT_REVIEW_MAX_FINDINGS, "review"),
-			maxCalls: readPositiveInt(review, "max_calls", DEFAULT_REVIEW_MAX_CALLS, "review"),
 			budgetMs: readPositiveInt(review, "budget_ms", DEFAULT_REVIEW_BUDGET_MS, "review"),
 		},
 	};

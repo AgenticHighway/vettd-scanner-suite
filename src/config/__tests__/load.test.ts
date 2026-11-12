@@ -48,8 +48,6 @@ enabled = true
 sources = ["vettd", "cisco"]
 min_severity = "high"
 context_lines = 20
-max_findings = 20
-max_calls = 30
 budget_ms = 30000
 `;
 
@@ -85,8 +83,6 @@ describe("parseConfig", () => {
 				sources: ["vettd", "cisco"],
 				minSeverity: "high",
 				contextLines: 20,
-				maxFindings: 20,
-				maxCalls: 30,
 				budgetMs: 30000,
 			},
 		});

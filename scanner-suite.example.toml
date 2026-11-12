@@ -79,7 +79,6 @@ sources = ["vettd", "cisco"]
 min_severity = "medium"
 # Context lines either side of a finding's cited line.
 context_lines = 40
-# Caps: most findings reviewed (highest severity first), most model calls, wall-clock budget.
-max_findings = 50
-max_calls = 60
+# Wall-clock budget; the stage fails closed (not_run/budget) past it. There is no
+# finding or call cap: every eligible finding is reviewed (amendment 14).
 budget_ms = 60000

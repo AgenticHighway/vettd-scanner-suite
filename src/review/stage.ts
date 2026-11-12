@@ -19,7 +19,7 @@ const STAGE_SLACK_MS = 30_000;
 export const DEFAULT_REVIEW_OPTS: ReviewStageOpts = {
 	sources: ["vettd", "cisco"],
 	minSeverity: "medium",
-	reviewerConfig: {contextLines: 40, maxCalls: 60, maxFindings: 50, budgetMs: 60_000},
+	reviewerConfig: {contextLines: 40, budgetMs: 60_000},
 };
 
 export interface ReviewStageOpts {
@@ -27,8 +27,6 @@ export interface ReviewStageOpts {
 	minSeverity: AssetFinding["severity"];
 	reviewerConfig: {
 		contextLines: number;
-		maxCalls: number;
-		maxFindings: number;
 		budgetMs: number;
 	};
 	/** Wall-clock bound for the whole stage (default: the reviewer budget plus slack). */

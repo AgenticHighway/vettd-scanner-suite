@@ -39,7 +39,7 @@ function mockConnector(handler: (payload: string, rules: string[]) => DecisionRe
 	} as unknown as DecisionConnector;
 }
 
-const OPTS = {config: {contextLines: 40, maxCalls: 60, maxFindings: 50, budgetMs: 60_000}};
+const OPTS = {config: {contextLines: 40, budgetMs: 60_000}};
 
 describe("createSystem1Reviewer", () => {
 	it("maps a valid answer pair to a reviewed entry with verdict, probabilities and severity", async () => {
@@ -110,21 +110,20 @@ describe("createSystem1Reviewer", () => {
 		expect(report.calls[0].error).toBe("http_error");
 	});
 
-	it("the finding cap keeps the highest-severity findings and stamps the rest not_run cap", async () => {
+	// Amendment 14: no finding cap — a skill with more eligible findings than the old
+	// max_findings (50) still gets every one of them asked, in severity order.
+	it("a skill with more findings than the old cap gets every one reviewed", async () => {
 		const asked: number[] = [];
 		const connector = mockConnector((_p, keys) => {
 			asked.push(...keys.filter((k) => k.endsWith("_validity")).map((k) => Number(k.slice(1, k.indexOf("_")))));
 			return responseFor({});
 		});
-		const targets = [
-			target(0, {severity: "medium"}),
-			target(1, {severity: "critical"}),
-			target(2, {severity: "high"}),
-		];
-		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, targets, {...OPTS, config: {...OPTS.config, maxFindings: 2}});
-		expect(asked.sort()).toEqual([1, 2]); // critical + high asked, medium stamped cap
-		expect(entries[0]).toMatchObject({status: "not_run", reason: "cap"});
-		expect(entries.filter((e) => e.status === "failed").length).toBe(2); // answered unusably, but asked
+		const targets = Array.from({length: 60}, (_, i) => target(i, {severity: i % 3 === 0 ? "critical" : "medium", detail: `Detected in scripts/run.sh:${i + 1} — \`x${i}\``, label: `rule ${i}`}));
+		const {entries, report} = await createSystem1Reviewer(CFG, connector).review(input, targets, OPTS);
+		expect(asked).toHaveLength(60);
+		expect(entries).toHaveLength(60);
+		expect(entries.every((e) => e.status === "failed" && e.reason === "unanswered")).toBe(true); // asked, answered unusably
+		expect(report.stopped).toBeUndefined(); // nothing stopped the stage
 	});
 
 	it("groups findings sharing a region into one call", async () => {

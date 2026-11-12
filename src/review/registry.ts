@@ -19,8 +19,6 @@ export function reviewStageOpts(config: SuiteConfig): ReviewStageOpts {
 		minSeverity: config.review.minSeverity,
 		reviewerConfig: {
 			contextLines: config.review.contextLines,
-			maxCalls: config.review.maxCalls,
-			maxFindings: config.review.maxFindings,
 			budgetMs: config.review.budgetMs,
 		},
 	};

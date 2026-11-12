@@ -16,7 +16,6 @@ export type ReviewStatus = "reviewed" | "exempt" | "not_run" | "failed";
 export type ReviewFailReason =
 	| "excluded" // the reviewer was in this job's excludeScanners (consent gate)
 	| "unavailable" // no API key / reviewer not available()
-	| "cap" // max_findings or max_calls reached before this finding was asked
 	| "budget" // the review time budget expired before this finding was asked
 	| "timeout" // the model call for this finding timed out
 	| "http_error" // the model call for this finding failed (transport, key, HTTP)
@@ -79,7 +78,7 @@ export interface ReviewCallRecord {
 export interface ReviewerReport {
 	calls: ReviewCallRecord[];
 	usage: DecisionUsage;
-	stopped?: "max_calls" | "budget";
+	stopped?: "budget";
 }
 
 /** One entry per target, same order as the targets passed in. */
@@ -91,8 +90,6 @@ export interface ReviewOutcome {
 export interface ReviewOptions {
 	config: {
 		contextLines: number;
-		maxCalls: number;
-		maxFindings: number;
 		budgetMs: number;
 	};
 }

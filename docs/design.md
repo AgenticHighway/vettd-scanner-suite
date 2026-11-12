@@ -425,9 +425,10 @@ finding counting exactly as it does today.
   placeholder after `redactSecrets` are stamped `exempt` and never sent to the
   model.
 - **Every eligible finding gets an entry** — `reviewed`, `exempt`, `not_run`
-  (`excluded` | `unavailable` | `cap` | `budget`) or `failed`
+  (`excluded` | `unavailable` | `budget`) or `failed`
   (`timeout` | `http_error` | `unanswered` | `internal`) — so the record can
-  always say what happened. Consent: a reviewer whose id is in the job's
+  always say what happened. There is no finding or call cap (amendment 14):
+  every eligible finding is reviewed; only the time budget can stop the stage. Consent: a reviewer whose id is in the job's
   `excludeScanners` stamps `not_run`/`excluded` and sends nothing, so vettd's
   consent gate (`excludeScanners: ["system1"]`) covers review with no new switch.
 - **Location**: parsed from the `Detected in <path>:<line>` / `<path>:<line> —`
@@ -438,9 +439,8 @@ finding counting exactly as it does today.
 - **Questions**: two per finding (validity: `real | not_executed | not_applicable`;
   severity: `critical | high | medium | low`), asked through the decision
   connector; findings sharing a context window share one call.
-- **Fail-closed**: an unanswered question, an option outside the set, the
-  `max_findings`/`max_calls` caps or the `budget_ms` budget stamp
-  `failed`/`not_run` and the finding keeps its effect.
+- **Fail-closed**: an unanswered question, an option outside the set, or the
+  `budget_ms` budget stamps `failed`/`not_run` and the finding keeps its effect.
 - **Run record**: the reviewer's call log lands on the System 1 run's
   `rawReport.review` (no new `ScannerRun` source, so "verified" consensus
   counting is unaffected).

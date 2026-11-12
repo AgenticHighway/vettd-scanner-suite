@@ -35,8 +35,6 @@ export const DEFAULT_SYSTEM1_LOCATE_BUDGET_MS = 40_000;
 export const DEFAULT_REVIEW_SOURCES = ["vettd", "cisco"];
 export const DEFAULT_REVIEW_MIN_SEVERITY = "medium";
 export const DEFAULT_REVIEW_CONTEXT_LINES = 40;
-export const DEFAULT_REVIEW_MAX_FINDINGS = 50;
-export const DEFAULT_REVIEW_MAX_CALLS = 60;
 export const DEFAULT_REVIEW_BUDGET_MS = 60_000;
 
 export interface ServerConfig {
@@ -120,10 +118,6 @@ export interface ReviewConfig {
 	minSeverity: "critical" | "high" | "medium" | "low";
 	/** Context lines either side of a cited line. */
 	contextLines: number;
-	/** Most findings one scan may put through review, highest severity first. */
-	maxFindings: number;
-	/** Most model calls one scan's review may make. */
-	maxCalls: number;
 	/** Wall time the whole review may take. */
 	budgetMs: number;
 }

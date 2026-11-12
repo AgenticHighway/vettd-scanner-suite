@@ -2,7 +2,7 @@
 // (validity, severity) against its context window — the cited line plus context_lines either
 // side, with the SKILL.md head as context when the file is not SKILL.md; location-less findings
 // are judged against part 1 of the payload. Fail-closed everywhere: a failed call, an unanswered
-// question, or a cap yields failed/not_run entries and the finding keeps its effect.
+// question, or the time budget yields failed/not_run entries and the finding keeps its effect.
 
 import type {System1ScannerConfig} from "../config/schema.js";
 import type {ScannerInput} from "../contract/scanner.js";
@@ -177,12 +177,10 @@ export function createSystem1Reviewer(cfg: System1ScannerConfig, connector: Deci
 			const report: ReviewerReport = {calls: [], usage: {}};
 			if (targets.length === 0) return {entries, report};
 
-			// The finding cap: highest severity first, stable within equal severity.
+			// No finding cap (amendment 14): every eligible target is reviewed; only the time
+			// budget can stop the stage, and it fails closed as not_run/budget.
 			const order = targets.map((t, i) => ({t, i, rank: SEVERITY_RANK[t.finding.severity] ?? 0})).sort((a, b) => b.rank - a.rank || a.i - b.i);
-			for (const {i} of order.slice(opts.config.maxFindings)) {
-				entries[i] = {reviewer: SYSTEM1_REVIEWER_ID, status: "not_run", reason: "cap"};
-			}
-			const reviewed = order.slice(0, opts.config.maxFindings);
+			const reviewed = order;
 
 			const payload = buildPayload(input.textFiles, cfg.partChars, cfg.maxParts);
 			const part1 = payload.parts[0]?.text ?? "";
@@ -213,11 +211,6 @@ export function createSystem1Reviewer(cfg: System1ScannerConfig, connector: Deci
 					if (Date.now() >= deadline) {
 						stamp({reviewer: SYSTEM1_REVIEWER_ID, status: "not_run", reason: "budget"});
 						report.stopped = "budget";
-						continue;
-					}
-					if (calls >= opts.config.maxCalls) {
-						stamp({reviewer: SYSTEM1_REVIEWER_ID, status: "not_run", reason: "cap"});
-						report.stopped = "max_calls";
 						continue;
 					}
 					calls++;
