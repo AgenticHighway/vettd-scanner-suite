@@ -89,7 +89,7 @@ const FAMILIES: Record<string, ReviewFamily> = {
 	},
 	"VTD-0088": {
 		definition: "External URL reference.",
-		prompt: "Does the skill actually use this URL — code fetches/sends to it, or the skill's instructions direct the agent or user to it — rather than the URL appearing in a comment or a quoted sample of someone else's page?",
+		prompt: "Does the skill actually use this URL — code fetches/sends to it, or the skill's instructions or reference files direct the agent or user to it — rather than the URL appearing in a code comment or a quoted sample of someone else's page? URLs in the skill's own SKILL.md, instructions or references/ files are part of what the skill directs the agent to read: they are used, not inert. Only URLs inside code comments or quoted third-party content are unused.",
 	},
 	"VTD-0090": {
 		definition: "Credential-exfiltration chain.",
