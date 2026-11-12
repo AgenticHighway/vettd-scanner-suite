@@ -73,7 +73,7 @@ const FAMILIES: Record<string, ReviewFamily> = {
 	},
 	"YARA_jailbreak_generic": {
 		definition: "Jailbreak-prompt pattern in skill text.",
-		prompt: "Is the cited text an actual jailbreak attempt — instructions directed at the agent to drop its rules? Educational or detection text in the skill's own documentation that describes jailbreak patterns, quotes attack phrases as examples, or references research about leaked keys is text about jailbreaks, not a jailbreak attempt: answer not_executed.",
+		prompt: "First ask whether this skill itself performs jailbreaks — does its code run jailbreak prompts against models, write them into user configs, or ship working jailbreak templates as its purpose? If yes, a jailbreak-pattern hit is real even when the cited line is documentation. Answer not_executed only when the skill does not itself perform jailbreaks and the cited text is purely educational or detection material about patterns (teaching, research references, quoted examples).",
 	},
 	"VTD-0005": {
 		definition: "Cloud credential file access.",
