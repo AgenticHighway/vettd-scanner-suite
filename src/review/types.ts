@@ -47,6 +47,10 @@ export interface ReviewEntry {
 	choice?: ReviewVerdictChoice;
 	/** Every validity option's probability, so any surface can show the full distribution. */
 	probabilities?: Record<string, number>;
+	/** The second, independently worded validity question's choice (amendment 11). */
+	choice2?: ReviewVerdictChoice;
+	/** The second question's option probabilities. */
+	probabilities2?: Record<string, number>;
 	/** p(real) for "real", summed not-real mass for "not_real". */
 	confidence?: number;
 	severity?: SeverityReview;

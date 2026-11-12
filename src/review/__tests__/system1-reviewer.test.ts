@@ -44,9 +44,10 @@ const OPTS = {config: {contextLines: 40, maxCalls: 60, maxFindings: 50, budgetMs
 describe("createSystem1Reviewer", () => {
 	it("maps a valid answer pair to a reviewed entry with verdict, probabilities and severity", async () => {
 		const connector = mockConnector((payload, keys) => {
-			expect(keys.sort()).toEqual(["f0_severity", "f0_validity"]);
+			expect(keys.sort()).toEqual(["f0_severity", "f0_validity", "f0_validity2"]);
 			expect(payload).toContain("### FILE: scripts/run.sh"); // region framing
-			return responseFor({f0_validity: {real: 0.9, not_executed: 0.07, not_applicable: 0.03}, f0_severity: {critical: 0.1, high: 0.85, medium: 0.04, low: 0.01}});
+			expect(payload).toContain("### SKILL:"); // skill identity rides along (amendment 10)
+			return responseFor({f0_validity: {real: 0.9, not_executed: 0.07, not_applicable: 0.03}, f0_validity2: {real: 0.85, not_executed: 0.1, not_applicable: 0.05}, f0_severity: {critical: 0.1, high: 0.85, medium: 0.04, low: 0.01}});
 		});
 		const reviewer = createSystem1Reviewer(CFG, connector);
 		const {entries, report} = await reviewer.review(input, [target(0)], OPTS);
@@ -63,16 +64,39 @@ describe("createSystem1Reviewer", () => {
 		expect(report.calls).toHaveLength(1);
 	});
 
-	it("sums not-real mass for a not_real verdict", async () => {
-		const connector = mockConnector(() => responseFor({f0_validity: {real: 0.1, not_executed: 0.6, not_applicable: 0.3}, f0_severity: {critical: 0, high: 0, medium: 0, low: 1}}));
+	it("agreement of both validity questions on not_executed yields a not_real verdict", async () => {
+		const connector = mockConnector(() => responseFor({f0_validity: {real: 0.1, not_executed: 0.6, not_applicable: 0.3}, f0_validity2: {real: 0.05, not_executed: 0.8, not_applicable: 0.15}, f0_severity: {critical: 0, high: 0, medium: 0, low: 1}}));
 		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, [target(0)], OPTS);
 		expect(entries[0]).toMatchObject({verdict: "not_real"});
-		expect(entries[0].confidence ?? 0).toBeCloseTo(0.9, 6);
+		// Confidence for not_real is the min of the two questions' not_executed mass (amendment 11).
+		expect(entries[0].confidence ?? 0).toBeCloseTo(0.6, 6);
 		expect(entries[0].probabilities).toEqual({real: 0.1, not_executed: 0.6, not_applicable: 0.3});
 	});
 
+	it("disagreement between the two validity questions keeps the verdict real", async () => {
+		const connector = mockConnector(() => responseFor({f0_validity: {real: 0.1, not_executed: 0.6, not_applicable: 0.3}, f0_validity2: {real: 0.7, not_executed: 0.2, not_applicable: 0.1}, f0_severity: {critical: 0, high: 1, medium: 0, low: 0}}));
+		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, [target(0)], OPTS);
+		expect(entries[0]).toMatchObject({verdict: "real"});
+	});
+
+	// The boundary fixtures (fp-check round 4): a directing docstring is never demoted on
+	// question disagreement — the two-question gate is the spec'd behavior, not a bug.
+	it("a directing docstring finding is kept when the two questions disagree", async () => {
+		const connector = mockConnector(() => responseFor({f0_validity: {real: 0.9, not_executed: 0.08, not_applicable: 0.02}, f0_validity2: {real: 0.04, not_executed: 0.96, not_applicable: 0}, f0_severity: {critical: 0.7, high: 0.2, medium: 0.1, low: 0}}));
+		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, [target(0)], OPTS);
+		expect(entries[0]).toMatchObject({status: "reviewed", verdict: "real", choice: "real", choice2: "not_executed"});
+		expect(entries[0].probabilities2).toEqual({real: 0.04, not_executed: 0.96, not_applicable: 0});
+	});
+
+	it("a comment or printed usage hint is demoted only when both questions agree it is inert", async () => {
+		const connector = mockConnector(() => responseFor({f0_validity: {real: 0.03, not_executed: 0.96, not_applicable: 0.01}, f0_validity2: {real: 0.05, not_executed: 0.94, not_applicable: 0.01}, f0_severity: {critical: 0, high: 0, medium: 0, low: 1}}));
+		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, [target(0)], OPTS);
+		expect(entries[0]).toMatchObject({verdict: "not_real"});
+		expect(entries[0].confidence ?? 0).toBeCloseTo(0.94, 6);
+	});
+
 	it("an unanswered or invalid option fail-closes the entry", async () => {
-		const connector = mockConnector(() => ({model: "test-model", answers: {f0_validity: {probabilities: {real: 1}, choice: "maybe", confidence: 1}, f0_severity: {probabilities: {high: 1}, choice: "high", confidence: 1}}}));
+		const connector = mockConnector(() => ({model: "test-model", answers: {f0_validity: {probabilities: {real: 1}, choice: "maybe", confidence: 1}, f0_validity2: {probabilities: {real: 1}, choice: "real", confidence: 1}, f0_severity: {probabilities: {high: 1}, choice: "high", confidence: 1}}}));
 		const {entries} = await createSystem1Reviewer(CFG, connector).review(input, [target(0)], OPTS);
 		expect(entries[0]).toMatchObject({status: "failed", reason: "unanswered"});
 	});
@@ -139,7 +163,7 @@ describe("createSystem1Reviewer", () => {
 		let payload = "";
 		const connector = mockConnector((p) => {
 			payload = p;
-			return responseFor({f0_validity: {real: 1, not_executed: 0, not_applicable: 0}, f0_severity: {critical: 0, high: 1, medium: 0, low: 0}});
+			return responseFor({f0_validity: {real: 1, not_executed: 0, not_applicable: 0}, f0_validity2: {real: 1, not_executed: 0, not_applicable: 0}, f0_severity: {critical: 0, high: 1, medium: 0, low: 0}});
 		});
 		const t = target(0);
 		t.location = {scope: "skill"};
