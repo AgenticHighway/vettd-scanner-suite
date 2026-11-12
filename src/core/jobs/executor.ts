@@ -1,6 +1,8 @@
 import type {ScannerInput, SkillScanner} from "../../contract/scanner.js";
 import {logger} from "../../logger.js";
 import {runScanners} from "../runner.js";
+import {runReviewers, DEFAULT_REVIEW_OPTS, type ReviewStageOpts} from "../../review/stage.js";
+import type {FindingReviewer} from "../../review/types.js";
 import type {JobStore, ScanJob} from "./store.js";
 
 export interface JobExecutorDeps {
@@ -10,6 +12,10 @@ export interface JobExecutorDeps {
 	scannerTimeoutMs: number;
 	/** Jobs running simultaneously ([jobs].max_concurrent). */
 	maxConcurrent: number;
+	/** Post-scan reviewers ([review] config); empty list disables the stage. */
+	reviewers?: FindingReviewer[];
+	/** Eligibility and caps for the review stage; required when reviewers exist. */
+	reviewOpts?: ReviewStageOpts;
 }
 
 /**
@@ -84,6 +90,12 @@ export class JobExecutor {
 			// runScanners never throws by design — per-scanner failures land as
 			// errored/timeout/skipped run records. A throw here is infrastructure.
 			const results = await runScanners(scanners, input, {timeoutMs: scannerTimeoutMs});
+			// The review stage asks a model about deterministic findings; it stamps
+			// payload.reviews and never throws. Reviewers in excludeScanners do not run
+			// (the consent gate reuses the same id-space as scanners).
+			if (this.deps.reviewers?.length) {
+				await runReviewers(this.deps.reviewers, input, results, this.deps.reviewOpts ?? DEFAULT_REVIEW_OPTS, excludeScanners);
+			}
 			store.attachResults(jobId, results);
 			store.transition(jobId, "completed");
 		} catch (err) {

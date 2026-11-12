@@ -31,6 +31,14 @@ export const DEFAULT_SYSTEM1_LOCATE_MAX_CALLS = 60;
 export const DEFAULT_SYSTEM1_LOCATE_CONCURRENCY = 6;
 export const DEFAULT_SYSTEM1_LOCATE_BUDGET_MS = 40_000;
 
+// The review stage: System 1 judges each eligible regex/Cisco finding post-scan.
+export const DEFAULT_REVIEW_SOURCES = ["vettd", "cisco"];
+export const DEFAULT_REVIEW_MIN_SEVERITY = "medium";
+export const DEFAULT_REVIEW_CONTEXT_LINES = 40;
+export const DEFAULT_REVIEW_MAX_FINDINGS = 50;
+export const DEFAULT_REVIEW_MAX_CALLS = 60;
+export const DEFAULT_REVIEW_BUDGET_MS = 60_000;
+
 export interface ServerConfig {
 	host: string;
 	port: number;
@@ -103,6 +111,23 @@ export interface System1LocateConfig {
 	budgetMs: number;
 }
 
+/** The post-scan review of deterministic findings (fp-check). See src/review/. */
+export interface ReviewConfig {
+	enabled: boolean;
+	/** Finding sources eligible for review (regex and Cisco by default). */
+	sources: string[];
+	/** Findings below this severity are not reviewed. */
+	minSeverity: "critical" | "high" | "medium" | "low";
+	/** Context lines either side of a cited line. */
+	contextLines: number;
+	/** Most findings one scan may put through review, highest severity first. */
+	maxFindings: number;
+	/** Most model calls one scan's review may make. */
+	maxCalls: number;
+	/** Wall time the whole review may take. */
+	budgetMs: number;
+}
+
 export interface SuiteConfig {
 	server: ServerConfig;
 	jobs: JobsConfig;
@@ -112,4 +137,6 @@ export interface SuiteConfig {
 		socket: SocketScannerConfig;
 		system1: System1ScannerConfig;
 	};
+	/** Post-scan review stage; disabled by default like every model-touching scanner. */
+	review: ReviewConfig;
 }

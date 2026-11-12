@@ -7,6 +7,12 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
+	DEFAULT_REVIEW_BUDGET_MS,
+	DEFAULT_REVIEW_CONTEXT_LINES,
+	DEFAULT_REVIEW_MAX_CALLS,
+	DEFAULT_REVIEW_MAX_FINDINGS,
+	DEFAULT_REVIEW_MIN_SEVERITY,
+	DEFAULT_REVIEW_SOURCES,
 	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
 	DEFAULT_SYSTEM1_LOCATE_BUDGET_MS,
 	DEFAULT_SYSTEM1_LOCATE_CONCURRENCY,
@@ -80,6 +86,18 @@ function readUnitInterval(table: Record<string, unknown>, key: string, fallback:
 	return value;
 }
 
+type ReviewSeverity = "critical" | "high" | "medium" | "low";
+const SEVERITIES: readonly ReviewSeverity[] = ["critical", "high", "medium", "low"];
+
+function readSeverity(table: Record<string, unknown>, key: string, fallback: ReviewSeverity, ctx: string): ReviewSeverity {
+	const value = table[key];
+	if (value === undefined) return fallback;
+	if (typeof value !== "string" || !SEVERITIES.includes(value as ReviewSeverity)) {
+		throw new ConfigError(`[${ctx}] ${key} must be one of ${SEVERITIES.join(", ")}`);
+	}
+	return value as ReviewSeverity;
+}
+
 function readHost(table: Record<string, unknown>, key: string, fallback: string, ctx: string): string {
 	const value = table[key];
 	if (value === undefined) return fallback;
@@ -128,7 +146,7 @@ export function parseConfig(toml: string): SuiteConfig {
 		throw new ConfigError(`invalid TOML: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	const root = asTable(parsed, "config");
-	checkKeys(root, ["server", "jobs", "scanners"], "top level");
+	checkKeys(root, ["server", "jobs", "scanners", "review"], "top level");
 
 	const server = optionalTable(root, "server", "server");
 	checkKeys(server, ["host", "port"], "server");
@@ -158,6 +176,14 @@ export function parseConfig(toml: string): SuiteConfig {
 		],
 		"scanners.system1",
 	);
+
+	const review = optionalTable(root, "review", "review");
+	checkKeys(review, ["enabled", "sources", "min_severity", "context_lines", "max_findings", "max_calls", "budget_ms"], "review");
+	const rawSources = review.sources ?? DEFAULT_REVIEW_SOURCES;
+	if (!Array.isArray(rawSources) || rawSources.some((s) => typeof s !== "string")) {
+		throw new ConfigError(`[review] sources must be an array of strings`);
+	}
+	const minSeverity = readSeverity(review, "min_severity", DEFAULT_REVIEW_MIN_SEVERITY, "review");
 
 	return {
 		server: {
@@ -195,6 +221,15 @@ export function parseConfig(toml: string): SuiteConfig {
 					budgetMs: readPositiveInt(system1, "locate_budget_ms", DEFAULT_SYSTEM1_LOCATE_BUDGET_MS, "scanners.system1"),
 				},
 			},
+		},
+		review: {
+			enabled: readBool(review, "enabled", false, "review"),
+			sources: rawSources as string[],
+			minSeverity,
+			contextLines: readPositiveInt(review, "context_lines", DEFAULT_REVIEW_CONTEXT_LINES, "review"),
+			maxFindings: readPositiveInt(review, "max_findings", DEFAULT_REVIEW_MAX_FINDINGS, "review"),
+			maxCalls: readPositiveInt(review, "max_calls", DEFAULT_REVIEW_MAX_CALLS, "review"),
+			budgetMs: readPositiveInt(review, "budget_ms", DEFAULT_REVIEW_BUDGET_MS, "review"),
 		},
 	};
 }

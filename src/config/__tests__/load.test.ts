@@ -42,6 +42,15 @@ locate_target_lines = 20
 locate_max_calls = 10
 locate_concurrency = 2
 locate_budget_ms = 5000
+
+[review]
+enabled = true
+sources = ["vettd", "cisco"]
+min_severity = "high"
+context_lines = 20
+max_findings = 20
+max_calls = 30
+budget_ms = 30000
 `;
 
 describe("parseConfig", () => {
@@ -70,6 +79,15 @@ describe("parseConfig", () => {
 					maxParts: 4,
 					locate: {enabled: false, targetLines: 20, maxCalls: 10, concurrency: 2, budgetMs: 5000},
 				},
+			},
+			review: {
+				enabled: true,
+				sources: ["vettd", "cisco"],
+				minSeverity: "high",
+				contextLines: 20,
+				maxFindings: 20,
+				maxCalls: 30,
+				budgetMs: 30000,
 			},
 		});
 	});
