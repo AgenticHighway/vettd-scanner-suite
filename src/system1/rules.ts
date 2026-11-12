@@ -306,23 +306,9 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 	{
 		kind: "choice",
 		emit: "finding",
-		ruleId: "S1-0012",
-		key: "hardcoded_secrets",
-		prompt: {
-			instructions: "API keys or tokens hardcoded in source.",
-			none: "The skill package does not contain a hardcoded API key or token in source.",
-			present: "The skill package contains a hardcoded API key or token in source.",
-		},
-		summary: "Hardcoded API keys or tokens",
-		section: "SS3",
-		instructions: "API keys or tokens hardcoded in source.",
-		none: "The skill package does not contain a hardcoded API key or token in source.",
-		present: "The skill package contains a hardcoded API key or token in source.",
-		severity: "critical",
-	},
-	{
-		kind: "choice",
-		emit: "finding",
+		// S1-0012 (hardcoded secrets) is retired: the model only ever sees redaction
+		// placeholders where literal secrets stood, so it cannot judge the original.
+		// The regex scanner owns hardcoded secrets. The id is never reused.
 		ruleId: "S1-0013",
 		key: "obfuscation",
 		prompt: {
@@ -641,7 +627,7 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		instructions: "A read-to-send, collect-to-post, or gather-to-upload chain that goes beyond the skill's own declared purpose -- not merely the skill calling its own documented external API to do the job it says it does.",
 		none: "The skill package does not contain a multi-step read-to-send, collect-to-post, or gather-to-upload operation that exceeds the skill's own declared purpose.",
 		present: "The skill package contains a multi-step read-to-send, collect-to-post, or gather-to-upload operation that exceeds the skill's own declared purpose.",
-		severity: "medium",
+		severity: "high",
 	},
 	{
 		kind: "choice",
@@ -692,7 +678,7 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		instructions: "Data crossing a local-to-network or file-to-API boundary in a way that goes beyond the skill's own declared purpose -- e.g. sending local files or credentials externally, not just the skill calling its own documented external API to do the job it says it does.",
 		none: "The skill package does not contain data flow crossing a local-to-network or file-to-API boundary in a way that exceeds the skill's own declared purpose.",
 		present: "The skill package contains data flow crossing a local-to-network or file-to-API boundary in a way that exceeds the skill's own declared purpose.",
-		severity: "medium",
+		severity: "high",
 	},
 	{
 		kind: "choice",
@@ -727,6 +713,40 @@ export const SYSTEM1_RULES: readonly System1Rule[] = [
 		none: "The skill package does not contain data access beyond what the skill's stated scope calls for.",
 		present: "The skill package contains data access beyond what the skill's stated scope calls for.",
 		severity: "medium",
+	},
+	{
+		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0035",
+		key: "instruction_integrity",
+		prompt: {
+			instructions: "Does the skill do any of these three: (a) tell the agent not to read or inspect its bundled code ('no need to read the implementation', 'treat scripts as a black box'), (b) describe automatic behavior that no bundled file implements, or (c) justify obfuscated code with a technical reason the code contradicts (e.g. 'the linter' for string concatenation, 'proxy caching' for a telemetry host)? Answer present if any one holds.",
+			none: "The skill's text is consistent with its bundle and invites inspection.",
+			present: "The skill discourages inspection, describes behavior nothing implements, or justifies obfuscation with a fabricated reason.",
+		},
+		summary: "Discourages inspection or misdescribes the bundle",
+		section: "SS4",
+		instructions: "SKILL.md text that discourages inspecting the code, describes behavior no bundled file implements, or justifies obfuscated code with fabricated reasons.",
+		none: "The skill's instructions are consistent with the bundle and do not discourage inspection.",
+		present: "The skill's instructions discourage inspection, misdescribe the bundle, or fabricate justifications for obfuscated code.",
+		severity: "medium",
+	},
+	{
+		kind: "choice",
+		emit: "finding",
+		ruleId: "S1-0036",
+		key: "credential_transport",
+		prompt: {
+			instructions: "Does any bundled code send credentials, tokens or secrets to a destination that is plain HTTP (an http:// URL), or taken from an environment variable or configuration value without any validation before use? Sending to a verified HTTPS endpoint of the service the credentials belong to does not count.",
+			none: "Credentials and tokens only travel to validated HTTPS endpoints of the service they belong to.",
+			present: "Credentials or tokens are sent over plain HTTP or to an unvalidated destination.",
+		},
+		summary: "Sends credentials over plain HTTP or to an unvalidated destination",
+		section: "SS3",
+		instructions: "Credentials sent to a plain-HTTP or unvalidated destination.",
+		none: "The skill package does not send credentials to a plain-HTTP or unvalidated destination.",
+		present: "The skill package sends credentials to a plain-HTTP or unvalidated destination.",
+		severity: "high",
 	},
 	{
 		kind: "choice",
