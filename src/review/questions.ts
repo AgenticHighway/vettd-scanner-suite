@@ -63,6 +63,18 @@ const FAMILIES: Record<string, ReviewFamily> = {
 		definition: "Cloud metadata endpoint probe.",
 		prompt: "Does the cited code actually contact a cloud metadata endpoint to harvest credentials or instance identity?",
 	},
+	"VTD-0008": {
+		definition: "Credential file path literal.",
+		prompt: "Does the cited code actually read the credential file — open() on the path, or a command consuming it? A bare path string inside a list of filenames the script names, prints, or checks for is data about the path, not access to the file: answer not_executed.",
+	},
+	"VTD-0012": {
+		definition: "Credential file path literal.",
+		prompt: "Does the cited code actually read the credential file — open() on the path, or a command consuming it? A bare path string inside a list of filenames the script names, prints, or checks for is data about the path, not access to the file: answer not_executed.",
+	},
+	"YARA_jailbreak_generic": {
+		definition: "Jailbreak-prompt pattern in skill text.",
+		prompt: "First ask whether this skill itself performs jailbreaks — does its code run jailbreak prompts against models, write them into user configs, or ship working jailbreak templates as its purpose? If yes, a jailbreak-pattern hit is real even when the cited line is documentation. Second ask whether the matched phrase is actually about LLM jailbreaking at all — a match on an unrelated technical term (a hardware or protocol master key, a crypto key, a database master key) is a rule-fit miss, not a jailbreak: answer not_executed for it — prefer not_executed over not_applicable in that case, since the flagged text is inert as a jailbreak. Otherwise answer not_executed only when the skill does not itself perform jailbreaks and the cited text is purely educational or detection material about patterns (teaching, research references, quoted examples).",
+	},
 	"VTD-0005": {
 		definition: "Cloud credential file access.",
 		prompt: "Does the cited code actually read a credentials file — not merely mention its path in help text or comments?",
@@ -79,6 +91,14 @@ const FAMILIES: Record<string, ReviewFamily> = {
 		definition: "Outbound POST with application/octet-stream.",
 		prompt: "Does the cited code actually POST file contents or collected data to a remote host?",
 	},
+	"VTD-0064": {
+		definition: "Prompt instruction override attempt.",
+		prompt: "Does the claimed steering actually happen — is this text prose the agent follows as an instruction to override prior instructions? Quoted example phrases, documentation of injection techniques, and detection payloads shown inside string literals or docstrings are quotes about the behavior, not the behavior: answer not_executed when the claimed instruction is never actually given to the agent.",
+	},
+	"VTD-0095": {
+		definition: "Structural requirement on the skill's files.",
+		prompt: "This rule is a structural claim about the skill's layout, not a behavior in code. Judge whether the claim is factually true of this skill: if the required structure is actually present (or the claim does not hold), the finding does not stand; the cited text is the rule's own statement, never executed as code.",
+	},
 	"VTD-0076": {
 		definition: "Chat template special token.",
 		prompt: "Is the special token actually used to steer the model, rather than appearing in quoted content, documentation or example text?",
@@ -89,7 +109,7 @@ const FAMILIES: Record<string, ReviewFamily> = {
 	},
 	"VTD-0088": {
 		definition: "External URL reference.",
-		prompt: "Does the skill actually use this URL — code fetches/sends to it, or the skill's instructions direct the agent or user to it — rather than the URL appearing in a comment or a quoted sample of someone else's page?",
+		prompt: "Does the skill actually use this URL — code fetches/sends to it, or the skill's instructions or reference files direct the agent or user to it — rather than the URL appearing in a code comment or a quoted sample of someone else's page? URLs in the skill's own SKILL.md, instructions or references/ files are part of what the skill directs the agent to read: they are used, not inert. Only URLs inside code comments or quoted third-party content are unused.",
 	},
 	"VTD-0090": {
 		definition: "Credential-exfiltration chain.",
@@ -180,6 +200,10 @@ const FAMILIES: Record<string, ReviewFamily> = {
 		definition: "Credential dumping tool reference or invocation.",
 		prompt: "Does the skill's code actually invoke or script a credential-dumping tool or API? Discussion or documentation of how the tool works is analysis, not the finding — the finding needs the skill to run or direct the user to run the tool.",
 	},
+	"VTD-0080": {
+		definition: "Base64-encoded content present in the skill's documentation.",
+		prompt: "This rule's claim is presence, not execution: it reports that base64-encoded content appears in the skill's documentation, where it is rarely expected. The finding is real whenever a base64 payload genuinely appears in the skill's text — including an inline data: URI example — because the payload is present in what the agent reads. Answer not_executed only when the cited text contains no actual base64 payload.",
+	},
 	"VTD-0082": {
 		definition: "Skill name resembles a popular skill name (typosquatting).",
 		prompt: "This rule is a factual claim about the skill's metadata, not about executing text: judge whether the skill's declared name really is confusingly close to the popular name the scanner named. If the claim is factually true of this skill, the finding is real.",
@@ -217,7 +241,7 @@ export const VALIDITY_OPTIONS: Record<string, string> = {
  *  printed usage/output strings, documentation-only examples) does not. */
 export const VALIDITY_OPTIONS_2: Record<string, string> = {
 	real: "When a user's agent uses this skill as intended, the flagged behavior occurs: code runs, an instruction the skill gives (setup, install or run steps) is followed, or data the skill's code uses is used.",
-	not_executed: "When a user's agent uses this skill as intended, the flagged text affects nothing: it is a comment, purely descriptive text that instructs no one, usage text merely printed to the user, a negative example, or a documentation example the skill never uses. Install or setup instructions the skill gives DO affect what happens and are not inert.",
+	not_executed: "When a user's agent uses this skill as intended, the flagged text affects nothing: it is a comment, purely descriptive text that instructs no one, usage text merely printed to the user, a negative example, a documentation example the skill never uses, or a bare literal the program merely stores in a list or variable without using it to act (a filename in a list of paths to print or check, a pattern in a rules table). Install or setup instructions the skill gives DO affect what happens and are not inert.",
 	not_applicable: "The flagged behavior occurs, but the scanner's rule does not fit it.",
 };
 
