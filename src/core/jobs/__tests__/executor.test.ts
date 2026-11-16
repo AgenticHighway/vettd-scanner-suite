@@ -32,11 +32,30 @@ describe("JobExecutor", () => {
 			store,
 			scanners: [makeScanner("alpha", async () => successOutput("alpha"))],
 			scannerTimeoutMs: 5000,
+				totalDeadlineMs: 80_000,
 			maxConcurrent: 2,
 		});
 		const job = executor.submit(input);
 		expect(job.id).toBeTruthy();
 		expect(store.get(job.id)).toBeDefined();
+	});
+
+	it("never invokes or reports a scanner the caller excluded (not merely hidden)", async () => {
+		const store = new InMemoryJobStore();
+		const gated = vi.fn(async () => successOutput("gated"));
+		const available = vi.fn(async () => true);
+		const executor = new JobExecutor({
+			store,
+			scanners: [makeScanner("alpha", async () => successOutput("alpha")), {id: "gated", available, scan: gated}],
+			scannerTimeoutMs: 5000,
+				totalDeadlineMs: 80_000,
+			maxConcurrent: 2,
+		});
+		const job = executor.submit(input, ["gated"]);
+		await executor.idle();
+		expect(store.get(job.id)!.results!.map((r) => r.run.source)).toEqual(["alpha"]);
+		expect(gated).not.toHaveBeenCalled();
+		expect(available).not.toHaveBeenCalled();
 	});
 
 	it("runs a submitted job to completion with results attached", async () => {
@@ -45,6 +64,7 @@ describe("JobExecutor", () => {
 			store,
 			scanners: [makeScanner("alpha", async () => successOutput("alpha"))],
 			scannerTimeoutMs: 5000,
+				totalDeadlineMs: 80_000,
 			maxConcurrent: 2,
 		});
 		const job = executor.submit(input);
@@ -74,7 +94,7 @@ describe("JobExecutor", () => {
 			return successOutput("slow");
 		});
 		const store = new InMemoryJobStore();
-		const executor = new JobExecutor({store, scanners: [scanner], scannerTimeoutMs: 5000, maxConcurrent: 1});
+		const executor = new JobExecutor({store, scanners: [scanner], scannerTimeoutMs: 5000, totalDeadlineMs: 80_000, maxConcurrent: 1});
 
 		executor.submit(input);
 		executor.submit(input);
@@ -104,6 +124,7 @@ describe("JobExecutor", () => {
 			store: throwingStore,
 			scanners: [makeScanner("alpha", async () => successOutput("alpha"))],
 			scannerTimeoutMs: 5000,
+				totalDeadlineMs: 80_000,
 			maxConcurrent: 1,
 		});
 		const job = executor.submit(input);

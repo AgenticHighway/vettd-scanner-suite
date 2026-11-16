@@ -7,9 +7,23 @@ import {
 	DEFAULT_CISCO_QUEUE_DEPTH,
 	DEFAULT_CISCO_SHIM_URL,
 	DEFAULT_HEALTH_TIMEOUT_MS,
+	DEFAULT_REVIEW_BUDGET_MS,
+	DEFAULT_REVIEW_CONTEXT_LINES,
+	DEFAULT_REVIEW_MIN_SEVERITY,
+	DEFAULT_REVIEW_SOURCES,
+	DEFAULT_SYSTEM1_MARGIN_THRESHOLD,
+	DEFAULT_SYSTEM1_LOCATE_BUDGET_MS,
+	DEFAULT_SYSTEM1_LOCATE_CONCURRENCY,
+	DEFAULT_SYSTEM1_LOCATE_MAX_CALLS,
+	DEFAULT_SYSTEM1_LOCATE_TARGET_LINES,
+	DEFAULT_SYSTEM1_MAX_PARTS,
+	DEFAULT_SYSTEM1_PART_CHARS,
+	DEFAULT_SYSTEM1_MODEL,
+	DEFAULT_SYSTEM1_TIMEOUT_MS,
 	DEFAULT_MAX_BATCH_ITEMS,
 	DEFAULT_MAX_CONCURRENT_JOBS,
 	DEFAULT_SCANNER_TIMEOUT_MS,
+	DEFAULT_TOTAL_DEADLINE_MS,
 	DEFAULT_SCAN_TIMEOUT_MS,
 	DEFAULT_SERVER_HOST,
 	DEFAULT_SERVER_PORT,
@@ -62,6 +76,27 @@ function readPositiveInt(table: Record<string, unknown>, key: string, fallback: 
 	return value;
 }
 
+function readUnitInterval(table: Record<string, unknown>, key: string, fallback: number, ctx: string): number {
+	const value = table[key];
+	if (value === undefined) return fallback;
+	if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
+		throw new ConfigError(`[${ctx}] ${key} must be a number between 0 and 1`);
+	}
+	return value;
+}
+
+type ReviewSeverity = "critical" | "high" | "medium" | "low";
+const SEVERITIES: readonly ReviewSeverity[] = ["critical", "high", "medium", "low"];
+
+function readSeverity(table: Record<string, unknown>, key: string, fallback: ReviewSeverity, ctx: string): ReviewSeverity {
+	const value = table[key];
+	if (value === undefined) return fallback;
+	if (typeof value !== "string" || !SEVERITIES.includes(value as ReviewSeverity)) {
+		throw new ConfigError(`[${ctx}] ${key} must be one of ${SEVERITIES.join(", ")}`);
+	}
+	return value as ReviewSeverity;
+}
+
 function readHost(table: Record<string, unknown>, key: string, fallback: string, ctx: string): string {
 	const value = table[key];
 	if (value === undefined) return fallback;
@@ -110,16 +145,16 @@ export function parseConfig(toml: string): SuiteConfig {
 		throw new ConfigError(`invalid TOML: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	const root = asTable(parsed, "config");
-	checkKeys(root, ["server", "jobs", "scanners"], "top level");
+	checkKeys(root, ["server", "jobs", "scanners", "review"], "top level");
 
 	const server = optionalTable(root, "server", "server");
 	checkKeys(server, ["host", "port"], "server");
 
 	const jobs = optionalTable(root, "jobs", "jobs");
-	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items"], "jobs");
+	checkKeys(jobs, ["max_concurrent", "scanner_timeout_ms", "max_batch_items", "total_deadline_ms"], "jobs");
 
 	const scanners = optionalTable(root, "scanners", "scanners");
-	checkKeys(scanners, ["vettd", "cisco", "socket"], "scanners");
+	checkKeys(scanners, ["vettd", "cisco", "socket", "system1"], "scanners");
 
 	const cisco = optionalTable(scanners, "cisco", "scanners.cisco");
 	checkKeys(
@@ -131,6 +166,23 @@ export function parseConfig(toml: string): SuiteConfig {
 	checkKeys(vettd, ["enabled", "shim_url", "health_timeout_ms", "scan_timeout_ms"], "scanners.vettd");
 	const socket = optionalTable(scanners, "socket", "scanners.socket");
 	checkKeys(socket, ["enabled", "timeout_ms"], "scanners.socket");
+	const system1 = optionalTable(scanners, "system1", "scanners.system1");
+	checkKeys(
+		system1,
+		[
+			"enabled", "model", "timeout_ms", "margin_threshold", "part_chars", "max_parts",
+			"locate", "locate_target_lines", "locate_max_calls", "locate_concurrency", "locate_budget_ms",
+		],
+		"scanners.system1",
+	);
+
+	const review = optionalTable(root, "review", "review");
+	checkKeys(review, ["enabled", "sources", "min_severity", "context_lines", "budget_ms"], "review");
+	const rawSources = review.sources ?? DEFAULT_REVIEW_SOURCES;
+	if (!Array.isArray(rawSources) || rawSources.some((s) => typeof s !== "string")) {
+		throw new ConfigError(`[review] sources must be an array of strings`);
+	}
+	const minSeverity = readSeverity(review, "min_severity", DEFAULT_REVIEW_MIN_SEVERITY, "review");
 
 	return {
 		server: {
@@ -140,6 +192,7 @@ export function parseConfig(toml: string): SuiteConfig {
 		jobs: {
 			maxConcurrent: readPositiveInt(jobs, "max_concurrent", DEFAULT_MAX_CONCURRENT_JOBS, "jobs"),
 			scannerTimeoutMs: readPositiveInt(jobs, "scanner_timeout_ms", DEFAULT_SCANNER_TIMEOUT_MS, "jobs"),
+			totalDeadlineMs: readPositiveInt(jobs, "total_deadline_ms", DEFAULT_TOTAL_DEADLINE_MS, "jobs"),
 			maxBatchItems: readPositiveInt(jobs, "max_batch_items", DEFAULT_MAX_BATCH_ITEMS, "jobs"),
 		},
 		scanners: {
@@ -153,6 +206,28 @@ export function parseConfig(toml: string): SuiteConfig {
 				enabled: readBool(socket, "enabled", false, "scanners.socket"),
 				timeoutMs: readPositiveInt(socket, "timeout_ms", DEFAULT_SOCKET_TIMEOUT_MS, "scanners.socket"),
 			},
+			system1: {
+				enabled: readBool(system1, "enabled", false, "scanners.system1"),
+				model: readHost(system1, "model", DEFAULT_SYSTEM1_MODEL, "scanners.system1"),
+				timeoutMs: readPositiveInt(system1, "timeout_ms", DEFAULT_SYSTEM1_TIMEOUT_MS, "scanners.system1"),
+				marginThreshold: readUnitInterval(system1, "margin_threshold", DEFAULT_SYSTEM1_MARGIN_THRESHOLD, "scanners.system1"),
+				partChars: readPositiveInt(system1, "part_chars", DEFAULT_SYSTEM1_PART_CHARS, "scanners.system1"),
+				maxParts: readPositiveInt(system1, "max_parts", DEFAULT_SYSTEM1_MAX_PARTS, "scanners.system1"),
+				locate: {
+					enabled: readBool(system1, "locate", true, "scanners.system1"),
+					targetLines: readPositiveInt(system1, "locate_target_lines", DEFAULT_SYSTEM1_LOCATE_TARGET_LINES, "scanners.system1"),
+					maxCalls: readPositiveInt(system1, "locate_max_calls", DEFAULT_SYSTEM1_LOCATE_MAX_CALLS, "scanners.system1"),
+					concurrency: readPositiveInt(system1, "locate_concurrency", DEFAULT_SYSTEM1_LOCATE_CONCURRENCY, "scanners.system1"),
+					budgetMs: readPositiveInt(system1, "locate_budget_ms", DEFAULT_SYSTEM1_LOCATE_BUDGET_MS, "scanners.system1"),
+				},
+			},
+		},
+		review: {
+			enabled: readBool(review, "enabled", false, "review"),
+			sources: rawSources as string[],
+			minSeverity,
+			contextLines: readPositiveInt(review, "context_lines", DEFAULT_REVIEW_CONTEXT_LINES, "review"),
+			budgetMs: readPositiveInt(review, "budget_ms", DEFAULT_REVIEW_BUDGET_MS, "review"),
 		},
 	};
 }

@@ -30,4 +30,18 @@ export interface AssetFinding {
 	source?: string;
 	/** Rule identifier — VTD-#### for vettd-native findings, upstream id (e.g. AITech-1.1.1) for external scanners */
 	ruleId?: string;
+	/** How the emitter reached this finding; open string, same reserved vocabulary as AssetSignal.derivation. Null = not stated; deterministic scanners never set it. */
+	derivation?: string | null;
+	/** Emitter confidence in the finding, 0-1 inclusive. Null must never be read as zero confidence. */
+	confidence?: number | null;
+	/**
+	 * Emitter tail ONLY (e.g. a model's per-option probabilities); nothing queries or indexes this.
+	 *
+	 * Review stage writes `payload.reviews`: an array with one entry per reviewer, stamped after all
+	 * scanners finish (src/review/). Each entry states the review outcome for this finding:
+	 * `{reviewer, model?, status: "reviewed"|"exempt"|"not_run"|"failed", reason?, verdict?, choice?,
+	 * probabilities?, confidence?, severity?: {choice, probabilities, confidence}, context?}`.
+	 * Entries never change the finding on this side; vettd applies the outcome at persist.
+	 */
+	payload?: Record<string, unknown> | null;
 }

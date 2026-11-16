@@ -8,6 +8,7 @@ import {JobExecutor} from "../core/jobs/executor.js";
 import {InMemoryJobStore} from "../core/jobs/store.js";
 import {buildScanners} from "../core/registry.js";
 import {logger} from "../logger.js";
+import {buildReviewers, reviewStageOpts} from "../review/registry.js";
 import {buildApp} from "./app.js";
 
 const configPath = process.argv[2] ?? DEFAULT_CONFIG_PATH;
@@ -35,7 +36,10 @@ const executor = new JobExecutor({
 	store,
 	scanners,
 	scannerTimeoutMs: config.jobs.scannerTimeoutMs,
+				totalDeadlineMs: config.jobs.totalDeadlineMs,
 	maxConcurrent: config.jobs.maxConcurrent,
+	reviewers: buildReviewers(config),
+	reviewOpts: reviewStageOpts(config),
 });
 const app = buildApp({store, executor, batches, maxBatchItems: config.jobs.maxBatchItems});
 

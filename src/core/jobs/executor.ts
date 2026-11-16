@@ -1,6 +1,8 @@
 import type {ScannerInput, SkillScanner} from "../../contract/scanner.js";
 import {logger} from "../../logger.js";
 import {runScanners} from "../runner.js";
+import {runReviewers, DEFAULT_REVIEW_OPTS, type ReviewStageOpts} from "../../review/stage.js";
+import type {FindingReviewer} from "../../review/types.js";
 import type {JobStore, ScanJob} from "./store.js";
 
 export interface JobExecutorDeps {
@@ -8,8 +10,14 @@ export interface JobExecutorDeps {
 	scanners: SkillScanner[];
 	/** Per-scanner hard timeout ([jobs].scanner_timeout_ms). */
 	scannerTimeoutMs: number;
+	/** Total job wall clock ([jobs].total_deadline_ms); the review gets only what is left of it. */
+	totalDeadlineMs: number;
 	/** Jobs running simultaneously ([jobs].max_concurrent). */
 	maxConcurrent: number;
+	/** Post-scan reviewers ([review] config); empty list disables the stage. */
+	reviewers?: FindingReviewer[];
+	/** Eligibility and caps for the review stage; required when reviewers exist. */
+	reviewOpts?: ReviewStageOpts;
 }
 
 /**
@@ -23,10 +31,14 @@ export class JobExecutor {
 
 	constructor(private readonly deps: JobExecutorDeps) {}
 
-	/** Creates a job, schedules the scan, returns immediately. */
-	submit(input: ScannerInput): ScanJob {
+	/**
+	 * Creates a job, schedules the scan, returns immediately. `excludeScanners` names scanner ids
+	 * that must not run for this job at all (not run and hidden): the caller decides, e.g. no
+	 * consent to send content to a model provider. Omitted behaves as before.
+	 */
+	submit(input: ScannerInput, excludeScanners: readonly string[] = []): ScanJob {
 		const job = this.deps.store.create();
-		void this.runWhenSlotFree(job.id, input);
+		void this.runWhenSlotFree(job.id, input, excludeScanners);
 		return job;
 	}
 
@@ -38,10 +50,10 @@ export class JobExecutor {
 		});
 	}
 
-	private async runWhenSlotFree(jobId: string, input: ScannerInput): Promise<void> {
+	private async runWhenSlotFree(jobId: string, input: ScannerInput, excludeScanners: readonly string[]): Promise<void> {
 		await this.acquire();
 		try {
-			await this.runJob(jobId, input);
+			await this.runJob(jobId, input, excludeScanners);
 		} finally {
 			this.release();
 		}
@@ -72,13 +84,22 @@ export class JobExecutor {
 		}
 	}
 
-	private async runJob(jobId: string, input: ScannerInput): Promise<void> {
-		const {store, scanners, scannerTimeoutMs} = this.deps;
+	private async runJob(jobId: string, input: ScannerInput, excludeScanners: readonly string[]): Promise<void> {
+		const {store, scannerTimeoutMs} = this.deps;
+		const scanners = this.deps.scanners.filter((s) => !excludeScanners.includes(s.id));
+		const startAt = Date.now();
 		store.transition(jobId, "running");
 		try {
 			// runScanners never throws by design — per-scanner failures land as
 			// errored/timeout/skipped run records. A throw here is infrastructure.
 			const results = await runScanners(scanners, input, {timeoutMs: scannerTimeoutMs});
+			// The review stage asks a model about deterministic findings; it stamps
+			// payload.reviews and never throws. Reviewers in excludeScanners do not run
+			// (the consent gate reuses the same id-space as scanners).
+			if (this.deps.reviewers?.length) {
+				const opts = {...(this.deps.reviewOpts ?? DEFAULT_REVIEW_OPTS), deadlineAt: startAt + this.deps.totalDeadlineMs};
+				await runReviewers(this.deps.reviewers, input, results, opts, excludeScanners);
+			}
 			store.attachResults(jobId, results);
 			store.transition(jobId, "completed");
 		} catch (err) {
