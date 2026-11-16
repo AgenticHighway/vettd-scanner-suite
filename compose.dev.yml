@@ -14,6 +14,10 @@ services:
     image: ${SUITE_IMAGE:?}
     volumes:
       - ./deploy/scanner-suite.docker.toml:/config/scanner-suite.toml:ro
+    # From .env.secrets on the box (appended to .env.dev by deploy-dev.yml).
+    # System 1 is skipped when unset.
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     networks:
       - vettd-dev-net
     depends_on:
