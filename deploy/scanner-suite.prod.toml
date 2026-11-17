@@ -49,3 +49,8 @@ timeout_ms = 45000
 margin_threshold = 0.5
 part_chars = 400000
 max_parts = 25
+
+[review]
+# Post-scan review of regex and Cisco findings by System 1 (defaults in scanner-suite.example.toml).
+# Uses the same OPENROUTER_API_KEY; without it the review does not run and findings are unchanged.
+enabled = true
