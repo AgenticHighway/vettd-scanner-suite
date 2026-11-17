@@ -13,6 +13,9 @@ port = 8080
 max_concurrent = 2
 # Per-scanner hard timeout within a job.
 scanner_timeout_ms = 120000
+# Total wall clock for one job (scanners plus review). vettd polls synchronously with a 90 s
+# deadline, so the default leaves a 10 s margin; the review stage gets only what is left.
+total_deadline_ms = 80000
 # Items allowed in one POST /scans/batch submission. A caller's poll deadline
 # must account for worst-case drain time: ceil(items / max_concurrent) x
 # per-job duration — a full batch at the defaults above can take minutes, not
@@ -43,3 +46,42 @@ queue_depth = 50
 # Socket.dev dependency analysis (external SaaS; requires SOCKET_API_KEY).
 enabled = false
 timeout_ms = 30000
+
+[scanners.system1]
+# System 1: typed questions over SKILL.md + scripts via OpenRouter's Decisions API (model below),
+# then one aggregate severity call on the safety rules that clearly fired. External SaaS; requires
+# OPENROUTER_API_KEY (the run is skipped when it is unset).
+enabled = false
+model = "typesafe/jev-1.13"
+# Per HTTP call (two calls per scan at most).
+timeout_ms = 45000
+# A rule fires only when P(fired) - P(none) >= this. 0.5 means P(fired) >= 0.75.
+margin_threshold = 0.5
+# Every text file is read. Characters per model call (one call takes about 250k tokens); larger
+# skills are split into parts and a rule fires if it fires in any part.
+part_chars = 400000
+# Abuse ceiling: past this many parts the run is marked truncated.
+max_parts = 25
+# Locating fired safety findings: re-ask on halves of the files, then of the lines, of the text the
+# rule fired on, and report the file and line range that keeps it firing. Costs extra calls only
+# when a safety finding fired; failure never changes the run. Defaults are provisional (vettd#1229).
+locate = true
+locate_target_lines = 30
+locate_max_calls = 60
+locate_concurrency = 6
+locate_budget_ms = 40000
+
+[review]
+# Post-scan review: System 1 judges each eligible regex (vettd) and Cisco finding
+# for validity and severity, and the outcome rides on the finding as payload.reviews.
+# Secrets are never reviewed; failures leave the finding unchanged.
+enabled = false
+# Finding sources reviewed.
+sources = ["vettd", "cisco"]
+# Review findings at or above this severity.
+min_severity = "medium"
+# Context lines either side of a finding's cited line.
+context_lines = 40
+# Wall-clock budget; the stage fails closed (not_run/budget) past it. There is no
+# finding or call cap: every eligible finding is reviewed (amendment 14).
+budget_ms = 60000

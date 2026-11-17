@@ -43,7 +43,7 @@ interface SarifRule {
 interface SarifLocation {
 	physicalLocation?: {
 		artifactLocation?: {uri?: string};
-		region?: {startLine?: number};
+		region?: {startLine?: number; snippet?: {text?: string}};
 	};
 }
 
@@ -86,10 +86,8 @@ function resolveCategory(rule: SarifRule | undefined): AssetFinding["category"] 
 	return DEFAULT_FINDING_CATEGORY;
 }
 
-function buildDetail(result: SarifResult): string {
-	const location = result.locations?.[0]?.physicalLocation;
-	const uri = location?.artifactLocation?.uri;
-	const line = location?.region?.startLine;
+function buildDetail(result: SarifResult, line?: number): string {
+	const uri = result.locations?.[0]?.physicalLocation?.artifactLocation?.uri;
 	const message = result.message?.text?.trim() ?? "";
 
 	let detail: string;
@@ -104,10 +102,77 @@ function buildDetail(result: SarifResult): string {
 	return detail.length > MAX_DETAIL_LENGTH ? detail.slice(0, MAX_DETAIL_LENGTH) : detail;
 }
 
+// ─── Anchor correction ──────────────────────────────────────────────────────
+
+/**
+ * Verify a SARIF-cited startLine against the actual file content using the
+ * result's snippet, and return the line the snippet actually appears on.
+ *
+ * Cisco's YARA scanner computes line numbers against the SKILL.md
+ * "instruction body" (frontmatter stripped) but reports the location as the
+ * full file, so its line numbers can be offset by the frontmatter length
+ * while the snippet text itself is accurate.
+ *
+ * A finding may only move when its snippet unambiguously identifies one
+ * line: a single-line snippet with one occurrence moves; a single-line
+ * snippet with several occurrences moves to the occurrence closest to the
+ * cited line. A multi-line snippet spans several lines and a tied closest
+ * occurrence is genuinely ambiguous — in both cases keep the original cited
+ * line, because collapsing distinct findings onto one line destroys their
+ * distinct anchors.
+ */
+function resolveStartLine(
+	result: SarifResult,
+	files: Record<string, string> | undefined
+): number | undefined {
+	const location = result.locations?.[0]?.physicalLocation;
+	const region = location?.region;
+	const citedLine = region?.startLine;
+	if (citedLine == null || region?.snippet?.text == null) return citedLine;
+
+	const uri = location?.artifactLocation?.uri;
+	const content = uri ? files?.[uri] : undefined;
+	if (!content) return citedLine;
+
+	const snippet = region.snippet.text.trim();
+	if (!snippet) return citedLine;
+
+	const lines = content.split("\n");
+	const citedText = lines[citedLine - 1];
+	if (citedText != null && citedText.includes(snippet)) return citedLine;
+
+	if (snippet.includes("\n")) return citedLine;
+
+	const occurrences: number[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].includes(snippet)) occurrences.push(i + 1);
+	}
+	if (occurrences.length === 1) return occurrences[0];
+
+	if (occurrences.length > 1) {
+		let best = citedLine;
+		let bestDist = Infinity;
+		let tied = false;
+		for (const line of occurrences) {
+			const dist = Math.abs(line - citedLine);
+			if (dist < bestDist) {
+				best = line;
+				bestDist = dist;
+				tied = false;
+			} else if (dist === bestDist) {
+				tied = true;
+			}
+		}
+		if (!tied) return best;
+	}
+	return citedLine;
+}
+
 function mapResult(
 	result: SarifResult,
 	rulesById: Map<string, SarifRule>,
-	rulesByIndex: SarifRule[]
+	rulesByIndex: SarifRule[],
+	files: Record<string, string> | undefined
 ): AssetFinding {
 	const rule = resolveRule(result, rulesById, rulesByIndex);
 
@@ -133,7 +198,7 @@ function mapResult(
 	return {
 		category: resolveCategory(rule),
 		label,
-		detail: buildDetail(result),
+		detail: buildDetail(result, resolveStartLine(result, files)),
 		severity,
 		source: "cisco",
 		ruleId,
@@ -141,13 +206,13 @@ function mapResult(
 	};
 }
 
-function mapRun(run: SarifRun): AssetFinding[] {
+function mapRun(run: SarifRun, files: Record<string, string> | undefined): AssetFinding[] {
 	const rules: SarifRule[] = run.tool?.driver?.rules ?? [];
 	const rulesById = new Map<string, SarifRule>(
 		rules.filter((r) => r.id != null).map((r) => [r.id!, r])
 	);
 	const results: SarifResult[] = run.results ?? [];
-	return results.map((r) => mapResult(r, rulesById, rules));
+	return results.map((r) => mapResult(r, rulesById, rules, files));
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -155,13 +220,16 @@ function mapRun(run: SarifRun): AssetFinding[] {
 /**
  * Convert a Cisco SARIF blob (from skill-scanner --format sarif) to AssetFindings.
  * Pure and sync — invalid or unexpected shapes return [].
+ *
+ * `files`, when provided, supplies the scanned files' contents so cited
+ * startLines can be verified (and corrected) against the result snippets.
  */
-export function sarifToFindings(sarif: unknown): AssetFinding[] {
+export function sarifToFindings(sarif: unknown, files?: Record<string, string>): AssetFinding[] {
 	if (!sarif || typeof sarif !== "object") return [];
 	try {
 		const doc = sarif as SarifDocument;
 		const runs = doc.runs ?? [];
-		return runs.flatMap(mapRun);
+		return runs.flatMap((run) => mapRun(run, files));
 	} catch (err) {
 		logger.error({module: "adapters.sarif-adapter", err}, "Failed to parse SARIF document");
 		return [];

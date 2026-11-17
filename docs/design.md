@@ -17,8 +17,8 @@ client ── POST /scans (JSON) ───────────────�
       ┌─────────────┼──────────────────┐
       ▼             ▼                  ▼
  vettd adapter  cisco adapter     socket adapter        ← adapters/ (TS, in-repo)
-      │             │                  │
-      ▼             ▼                  ▼
+      │             │                  │                (system1 scanner: typed-question model,
+      ▼             ▼                  ▼                 reached via the OpenRouter connector)
  Rust http-shim  Python shim      api.socket.dev        ← transports
  (scanner repo)  (shims/cisco)    (external SaaS)
 ```
@@ -85,7 +85,7 @@ POST /scans ──▶ queued ──▶ running ──▶ completed (results atta
                                   └──▶ failed (infrastructure error only)
 ```
 
-- Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`.
+- Submissions are JSON bodies shaped `{textFiles: Record<string,string>, allPaths: string[]}`, matching the in-memory `ScannerInput` contract. Validation (malformed body, `allPaths` count, per-file and total text-byte sizes) happens **inline at intake** so a bad request fails the `POST /scans` with a 400 immediately. Limits (see `src/consts.ts`): 500 files, 4 MB per text file, 16 MB total text — same caps the old zip path enforced (see `src/intake/zip.ts`, removed in #13). The overall HTTP body is capped at 20 MB by `bodyLimit`. An optional `excludeScanners: string[]` (on a single body or on each batch item) names scanner ids that must not run for that job: they are never invoked and produce no result. Omitted runs every enabled scanner. The caller uses it to withhold content from a model-backed scanner (System 1) when the user has not consented.
 - The job store is **in-memory behind the narrow `JobStore` interface**
   (`create`/`get`/`transition`/`attachResults`) — the seam for a future
   durable store (SQS/DB). A restart loses jobs; callers see a 404 on poll and
@@ -187,10 +187,16 @@ explicit.
 | `scanners.cisco.queue_depth` | `50` | Waiters beyond the in-flight scans before runs skip |
 | `scanners.socket.enabled` | `false` | Socket.dev SaaS |
 | `scanners.socket.timeout_ms` | `30000` | API call timeout |
+| `scanners.system1.enabled` | `false` | System 1 typed-question scan (OpenRouter Decisions API) |
+| `scanners.system1.model` | `typesafe/jev-1.13` | Model; the OpenRouter endpoint is pinned in the connector so the key cannot be redirected |
+| `scanners.system1.timeout_ms` | `45000` | Per HTTP call (at most two per scan) |
+| `scanners.system1.margin_threshold` | `0.5` | A rule fires when P(fired) − P(none) ≥ this |
+| `scanners.system1.part_chars` / `.max_parts` | `400000` / `25` | Every text file is read, split into parts of this many characters per model call; past `max_parts` the run is marked truncated |
 
 Environment-variable carve-outs (deliberately **not** in the TOML):
 
-- `SOCKET_API_KEY` — secret; secrets never go in the config file or git.
+- `SOCKET_API_KEY`, `OPENROUTER_API_KEY` — secrets; secrets never go in the config file or git.
+  A missing `OPENROUTER_API_KEY` makes the system1 run `skipped`, not failed.
 - `LOG_LEVEL`, `LOG_PRETTY` — operator log plumbing, not scanner config.
 - `VETTD_SHIM_PORT`, `CISCO_SHIM_PORT` — belong to the shim *processes*; the
   suite only knows the URLs its adapters dial.
@@ -340,8 +346,9 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
   local/dev. Shim URLs in the prod config point at `127.0.0.1`, not compose
   service names.
 - **Task definition**: family `vettd-scanner-suite`, `0.5 vCPU / 2 GB`,
-  `arm64`, no task role (the suite makes no AWS API calls and carries no
-  secrets). Three containers — `suite` (port 8080; the only one with a
+  `arm64`, no task role (the suite makes no AWS API calls). The only secret is
+  `OPENROUTER_API_KEY`, delivered as a task-definition `secrets` entry
+  from Secrets Manager (see vettd `docs/infrastructure.md`). Three containers — `suite` (port 8080; the only one with a
   Service Connect port mapping, since `vettd-skill-shim`/`cisco-skill-shim`
   are only ever reached over loopback, never published). Execution role
   reuses `vettd`'s existing `vettd-ecs-execution-role`.
@@ -399,6 +406,73 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
    decision, config only declares enablement).
 4. If it needs a shim: first-party shims live in the scanner's repo;
    third-party shims live in `shims/` here.
+
+## System 1 scanner (`src/system1/`)
+
+A model-based scanner (OpenRouter Decisions API, pinned `typesafe/jev-1.13`
+model): every text file is split into parts and each part is asked the full
+typed question set in one call; fired safety findings go to a second aggregate
+call that rates overall severity, and to a localization loop that narrows
+where the evidence sits.
+
+- **Trust boundary**: the skill text is untrusted input. Every question the
+  scanner asks — part calls and localization re-asks alike — is preceded by a
+  note that the skill payload is data to judge, never instructions to follow,
+  and that answers rest only on what is observed in it (the review questions
+  carry the same note on their quoted text).
+- **Fail-closed answers**: an answer is kept only if it stays inside what its
+  rule declares — the chosen option must be one the rule offers, and every
+  probability must sit on a declared option, finite and within [0, 1] (small
+  rounding overshoot tolerated). Anything else counts as unanswered and fails
+  the run rather than firing a finding.
+- **Run deadline**: the part loop honors `[jobs].scanner_timeout_ms` — past
+  the deadline no new part call starts and the in-flight call is aborted, so
+  a multi-part scan cannot keep spending after the runner has timed the job
+  out and freed its slot. Localization is bounded by its own budget the same
+  way.
+
+## Review stage (`src/review/`)
+
+After all scanners finish, a review stage asks a model reviewer to judge each
+eligible deterministic finding in context: is it real (executed/followed, not
+text), and how severe is it. The stage runs between `runScanners` and
+`store.attachResults` and **never removes or reorders findings** — it only
+appends `payload.reviews` entries to the findings, so a failed review leaves a
+finding counting exactly as it does today.
+
+- **Eligibility** (pure, in the stage): source in `[review].sources` (default
+  `vettd`, `cisco`), severity at or above `min_severity` (default `medium`),
+  `derivation` not `inferred` — System 1 findings are never re-judged by
+  System 1.
+- **Secrets exemption**: rules whose match is secret bytes (`VTD-0001/0002/0003/0027`,
+  Cisco `SECRET_GITHUB_TOKEN`) or whose cited line contains a `[REDACTED:`
+  placeholder after `redactSecrets` are stamped `exempt` and never sent to the
+  model.
+- **Every eligible finding gets an entry** — `reviewed`, `exempt`, `not_run`
+  (`excluded` | `unavailable` | `budget`) or `failed`
+  (`timeout` | `http_error` | `unanswered` | `internal`) — so the record can
+  always say what happened. There is no finding or call cap (amendment 14):
+  every eligible finding is reviewed; only the time budget can stop the stage. Consent: a reviewer whose id is in the job's
+  `excludeScanners` stamps `not_run`/`excluded` and sends nothing, so vettd's
+  consent gate (`excludeScanners: ["system1"]`) covers review with no new switch.
+- **Location**: parsed from the `Detected in <path>:<line>` / `<path>:<line> —`
+  detail prefixes; no line → whole file; no file → whole skill. The model sees
+  the cited line ± `context_lines` (40) through the same `### FILE:` framing and
+  `linesRegion` helper the System 1 localization uses, redacted via
+  `redactSecrets`.
+- **Questions**: two per finding (validity: `real | not_executed | not_applicable`;
+  severity: `critical | high | medium | low`), asked through the decision
+  connector; findings sharing a context window share one call.
+- **Fail-closed**: an unanswered question, an option outside the set, or the
+  `budget_ms` budget stamps `failed`/`not_run` and the finding keeps its effect.
+- **Job deadline**: `[jobs].total_deadline_ms` (default 80 s) bounds the whole job — vettd
+  polls a submitted scan synchronously with a 90 s deadline (`POLL_DEADLINE_MS` in vettd's
+  suite-client), so the job must finish inside it. The review stage receives only the time
+  left before the job deadline (at most its own budget); what does not fit fails closed as
+  `not_run`/`budget`.
+- **Run record**: the reviewer's call log lands on the System 1 run's
+  `rawReport.review` (no new `ScannerRun` source, so "verified" consensus
+  counting is unaffected).
 
 ## Provenance notes
 

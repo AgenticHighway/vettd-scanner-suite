@@ -166,6 +166,7 @@ jobs:
                       \"echo 'SUITE_IMAGE=${SUITE_IMAGE}' >> .env.dev\",
                       \"echo 'CISCO_SHIM_IMAGE=${CISCO_SHIM_IMAGE}' >> .env.dev\",
                       \"echo 'VETTD_SHIM_IMAGE=${VETTD_SHIM_IMAGE}' >> .env.dev\",
+                      \"if test -f .env.secrets; then cat .env.secrets >> .env.dev; fi\",
                       \"aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}\",
                       \"docker compose --env-file .env.dev -f compose.dev.yml pull\",
                       \"docker compose --env-file .env.dev -f compose.dev.yml down\",

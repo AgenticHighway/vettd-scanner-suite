@@ -9,10 +9,12 @@ services:
       - "8080:8080"
     volumes:
       - ./deploy/scanner-suite.docker.toml:/config/scanner-suite.toml:ro
-    # Uncomment to enable the socket scanner (also requires
-    # scanners.socket.enabled = true in the mounted config):
-    # environment:
-    #   SOCKET_API_KEY: ${SOCKET_API_KEY:-}
+    # System 1 is skipped when OPENROUTER_API_KEY is unset.
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Uncomment to enable the socket scanner (also requires
+      # scanners.socket.enabled = true in the mounted config):
+      # SOCKET_API_KEY: ${SOCKET_API_KEY:-}
     #
     # Do NOT set LOG_PRETTY here: pino-pretty is a devDependency
     # (src/logger.ts), pruned out of this image's runtime stage — enabling it

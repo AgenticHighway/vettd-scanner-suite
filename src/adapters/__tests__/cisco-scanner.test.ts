@@ -40,7 +40,7 @@ function mockHealthOk() {
 	} as unknown as Response);
 }
 
-function mockScanOk(sarif = makeMinimalSarif()) {
+function mockScanOk(sarif: unknown = makeMinimalSarif()) {
 	mockFetch.mockResolvedValueOnce({
 		ok: true,
 		json: async () => ({ok: true, sarif, version: "2.0.11"}),
@@ -209,6 +209,83 @@ describe("ciscoScanner.scan()", () => {
 
 		const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
 		expect(url).toContain("9999");
+	});
+});
+
+// ─── MANIFEST_MISSING_LICENSE suppression ───────────────────────────────────
+
+function makeLicenseSarif() {
+	return {
+		version: "2.1.0",
+		runs: [
+			{
+				tool: {driver: {rules: [{id: "MANIFEST_MISSING_LICENSE", shortDescription: {text: "Skill does not specify a license"}, properties: {tags: ["policy_violation", "security"]}}]}},
+				results: [
+					{
+						ruleId: "MANIFEST_MISSING_LICENSE",
+						level: "note",
+						properties: {severity: "INFO"},
+						message: {text: "Skill manifest does not include a 'license' field."},
+						locations: [{physicalLocation: {artifactLocation: {uri: "SKILL.md"}, region: {startLine: 1}}}],
+					},
+				],
+			},
+		],
+	};
+}
+
+describe("ciscoScanner MANIFEST_MISSING_LICENSE suppression", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("suppresses the finding when the bundle contains a LICENSE file", async () => {
+		mockScanOk(makeLicenseSarif());
+		const scanner = makeScanner();
+		const result = await scanner.scan(makeInput({"SKILL.md": "x", "LICENSE": "MIT License\n"}));
+
+		expect(result.findings).toHaveLength(0);
+		expect(result.run.findingCount).toBe(0);
+	});
+
+	it("suppresses the finding when a README license section declares the license inline", async () => {
+		mockScanOk(makeLicenseSarif());
+		const scanner = makeScanner();
+		const readme = "## About\n\nA skill.\n\n## License\n\nMIT\n";
+		const result = await scanner.scan(makeInput({"SKILL.md": "x", "README.md": readme}));
+
+		expect(result.findings).toHaveLength(0);
+	});
+
+	it("keeps the finding when the README license section only links outside the bundle", async () => {
+		mockScanOk(makeLicenseSarif());
+		const scanner = makeScanner();
+		const readme = "## License\n\n[Apache 2.0](../../LICENSE).\n";
+		const result = await scanner.scan(makeInput({"SKILL.md": "x", "README.md": readme}));
+
+		expect(result.findings).toHaveLength(1);
+		expect(result.findings[0].ruleId).toBe("MANIFEST_MISSING_LICENSE");
+	});
+
+	it("keeps the finding when the bundle declares no license", async () => {
+		mockScanOk(makeLicenseSarif());
+		const scanner = makeScanner();
+		const result = await scanner.scan(makeInput({"SKILL.md": "x"}));
+
+		expect(result.findings).toHaveLength(1);
+	});
+
+	it("keeps non-license findings alongside suppression", async () => {
+		const sarif = makeLicenseSarif();
+		sarif.runs[0].tool.driver.rules.push({id: "OTHER", shortDescription: {text: "Other"}, properties: {tags: ["security"]}});
+		sarif.runs[0].results.push({
+			ruleId: "OTHER", level: "error", properties: {severity: "HIGH"}, message: {text: "other finding"},
+			locations: [{physicalLocation: {artifactLocation: {uri: "SKILL.md"}, region: {startLine: 2}}}],
+		});
+		mockScanOk(sarif);
+		const scanner = makeScanner();
+		const result = await scanner.scan(makeInput({"SKILL.md": "x", "LICENSE": "MIT License\n"}));
+
+		expect(result.findings).toHaveLength(1);
+		expect(result.findings[0].ruleId).toBe("OTHER");
 	});
 });
 

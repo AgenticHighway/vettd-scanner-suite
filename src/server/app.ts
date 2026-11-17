@@ -1,4 +1,4 @@
-import Fastify, {type FastifyBaseLogger, type FastifyInstance, type FastifyRequest} from "fastify";
+import Fastify, {LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyRequest} from "fastify";
 
 import {MAX_BODY_BYTES, MAX_FILES, MAX_TEXT_FILE_BYTES, MAX_TOTAL_TEXT_BYTES} from "../consts.js";
 import type {ScannerInput} from "../contract/scanner.js";
@@ -25,6 +25,8 @@ interface SubmitBody {
 	allPaths: string[];
 	bundlePath?: string;
 	repoPaths?: string[];
+	// Scanner ids that must not run for this item (omitted: all enabled scanners run).
+	excludeScanners?: string[];
 }
 
 // Custom content-type parser for application/json. Captures the raw body as a
@@ -45,7 +47,7 @@ function jsonBodyParser(
 	payload.on("error", (err: Error) => done(err, ""));
 }
 
-type ItemValidation = {ok: true; input: ScannerInput} | {ok: false; error: string};
+type ItemValidation = {ok: true; input: ScannerInput; excludeScanners: string[]} | {ok: false; error: string};
 
 // Shared by POST /scans and POST /scans/batch. Takes an already-JSON.parse'd
 // value: the two routes parse different envelopes and need different parse-
@@ -98,6 +100,12 @@ function validateScanItem(parsed: unknown): ItemValidation {
 		}
 	}
 
+	if (body.excludeScanners !== undefined) {
+		if (!Array.isArray(body.excludeScanners) || body.excludeScanners.some((id) => typeof id !== "string")) {
+			return {ok: false, error: "malformed body — 'excludeScanners' must be an array of strings"};
+		}
+	}
+
 	// Size guards. Fail the request immediately — the executor never sees
 	// oversized input, and callers don't poll to find out.
 	if (body.allPaths.length > MAX_FILES) {
@@ -128,6 +136,7 @@ function validateScanItem(parsed: unknown): ItemValidation {
 	return {
 		ok: true,
 		input: {textFiles, allPaths: body.allPaths, bundlePath: body.bundlePath, repoPaths: body.repoPaths},
+		excludeScanners: body.excludeScanners ?? [],
 	};
 }
 
@@ -165,16 +174,28 @@ function renderBatch(store: JobStore, batch: ScanBatch) {
 export function buildApp(deps: AppDeps): FastifyInstance {
 	// Widen to FastifyBaseLogger so the instance type stays the default
 	// FastifyInstance (fastify parameterizes its generics by the logger type).
-	const app = Fastify({loggerInstance: logger as FastifyBaseLogger, bodyLimit: MAX_BODY_BYTES});
+	//
+	// logController with a per-request disable: /health is hit every ~10s by
+	// Docker HEALTHCHECK (and polled before every scan by adapters'
+	// available() checks), so fastify's automatic "incoming request" /
+	// "request completed" lines would flood info-level output with entries
+	// that carry no operational value (issue #25). A route-level logLevel
+	// does NOT help here — those lines are emitted via .info() calls, and
+	// logLevel only lowers the child logger's threshold. Every other route
+	// keeps fastify's default info-level request logging.
+	const app = Fastify({
+		loggerInstance: logger as FastifyBaseLogger,
+		bodyLimit: MAX_BODY_BYTES,
+		logController: new LogController({
+			disableRequestLogging: (req) => req.url === "/health",
+		}),
+	});
 
 	// Override Fastify's default JSON parser so our handler sees the raw
 	// body string and can return its own 400 for malformed JSON.
 	app.addContentTypeParser("application/json", {}, jsonBodyParser);
 
-	// logLevel: "debug" — this route is hit every 10s by Docker HEALTHCHECK
-	// (and polled before every scan by adapters' available() checks), so its
-	// automatic request/response logs would otherwise flood info-level output.
-	app.get("/health", {logLevel: "debug"}, async () => ({ok: true}));
+	app.get("/health", async () => ({ok: true}));
 
 	app.post("/scans", async (request, reply) => {
 		const raw = request.body as string | undefined;
@@ -196,7 +217,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 		}
 
 		try {
-			const job = deps.executor.submit(validation.input);
+			const job = deps.executor.submit(validation.input, validation.excludeScanners);
 			return await reply.code(202).send({jobId: job.id, status: job.status});
 		} catch (err) {
 			if (err instanceof JobStoreFullError) {
@@ -279,7 +300,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 				continue;
 			}
 			try {
-				accepted.push({index, jobId: deps.executor.submit(validation.input).id});
+				accepted.push({index, jobId: deps.executor.submit(validation.input, validation.excludeScanners).id});
 			} catch (err) {
 				// A full job store rejects THIS item only. Siblings already
 				// queued keep running; the caller resubmits just this index.
