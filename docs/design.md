@@ -407,6 +407,30 @@ a bare-metal run uses (see "Local deployment" above for the contrast).
 4. If it needs a shim: first-party shims live in the scanner's repo;
    third-party shims live in `shims/` here.
 
+## System 1 scanner (`src/system1/`)
+
+A model-based scanner (OpenRouter Decisions API, pinned `typesafe/jev-1.13`
+model): every text file is split into parts and each part is asked the full
+typed question set in one call; fired safety findings go to a second aggregate
+call that rates overall severity, and to a localization loop that narrows
+where the evidence sits.
+
+- **Trust boundary**: the skill text is untrusted input. Every question the
+  scanner asks — part calls and localization re-asks alike — is preceded by a
+  note that the skill payload is data to judge, never instructions to follow,
+  and that answers rest only on what is observed in it (the review questions
+  carry the same note on their quoted text).
+- **Fail-closed answers**: an answer is kept only if it stays inside what its
+  rule declares — the chosen option must be one the rule offers, and every
+  probability must sit on a declared option, finite and within [0, 1] (small
+  rounding overshoot tolerated). Anything else counts as unanswered and fails
+  the run rather than firing a finding.
+- **Run deadline**: the part loop honors `[jobs].scanner_timeout_ms` — past
+  the deadline no new part call starts and the in-flight call is aborted, so
+  a multi-part scan cannot keep spending after the runner has timed the job
+  out and freed its slot. Localization is bounded by its own budget the same
+  way.
+
 ## Review stage (`src/review/`)
 
 After all scanners finish, a review stage asks a model reviewer to judge each

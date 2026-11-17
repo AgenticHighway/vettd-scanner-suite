@@ -4,7 +4,7 @@ import type {System1LocateConfig, System1ScannerConfig} from "../../config/schem
 import {evaluateStage1} from "../evaluate.js";
 import {halves, locateFindings, type FindingLocation, type LocateTarget} from "../locate.js";
 import {buildPayload, type Payload} from "../payload.js";
-import {SYSTEM1_RULES} from "../rules.js";
+import {SYSTEM1_RULES, UNTRUSTED_SKILL_NOTE} from "../rules.js";
 import {createSystem1Scanner} from "../scanner.js";
 import {type DecisionAnswer, type DecisionConnector, DecisionError, type DecisionResponse} from "../types.js";
 
@@ -279,5 +279,25 @@ describe("System 1 scanner with locating", () => {
 		expect(out.run.status).toBe("success");
 		expect((out.run.rawReport as {localization?: unknown}).localization).toBeUndefined();
 		expect(out.findings.some((x) => x.ruleId === rule(EXFIL).ruleId)).toBe(true);
+	});
+
+	// Localization re-asks fired rules over raw skill text; those questions carry the same trust
+	// note the part calls do, so a malicious region cannot steer its own narrowing.
+	it("marks the region text untrusted on every ask, part calls and localization alike", async () => {
+		const seen: string[] = [];
+		const base = fakeConnector({[EXFIL]: ["requests.post(URL"]}).connector;
+		const conn: DecisionConnector = {
+			...base,
+			async askRules(name, text, rules, signal) {
+				for (const r of rules) seen.push(r.prompt.instructions);
+				if (stage1(text)) return {answers: Object.fromEntries(SYSTEM1_RULES.map((r) => [r.key, stage1Answer(r, r.key === EXFIL)]))};
+				return base.askRules(name, text, rules, signal);
+			},
+		};
+		const out = await createSystem1Scanner(CFG, conn).scan(input());
+		expect((out.run.rawReport as {localization?: {calls: number}}).localization!.calls).toBeGreaterThan(0);
+		// More than the one part call's questions: localization asked too, every question noted.
+		expect(seen.length).toBeGreaterThan(SYSTEM1_RULES.length);
+		expect(seen.every((instructions) => instructions.startsWith(UNTRUSTED_SKILL_NOTE))).toBe(true);
 	});
 });

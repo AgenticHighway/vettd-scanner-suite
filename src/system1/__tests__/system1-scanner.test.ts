@@ -5,7 +5,7 @@ import type {System1ScannerConfig} from "../../config/schema.js";
 import type {ScannerInput} from "../../contract/scanner.js";
 import {evaluateStage1} from "../evaluate.js";
 import {buildPayload} from "../payload.js";
-import {SAFETY_RULES, SYSTEM1_RULES} from "../rules.js";
+import {SAFETY_RULES, SYSTEM1_RULES, UNTRUSTED_SKILL_NOTE} from "../rules.js";
 import {createSystem1Scanner, runVerdictFor} from "../scanner.js";
 import type {DecisionAnswer, DecisionResponse} from "../types.js";
 
@@ -178,6 +178,56 @@ describe("evaluateStage1", () => {
 	it("treats a classification answer outside its options as unanswered", () => {
 		const res = stage1Response({instruction_clarity: classAnswer(["clear", "bogus"], "bogus")});
 		expect(evaluateStage1(res, 0.5).unanswered).toEqual(["instruction_clarity"]);
+	});
+
+	// The model's response is untrusted: an invented option carrying favourable probabilities is
+	// steering or protocol drift, not evidence. Counted as fired it would manufacture a security
+	// finding the rule never declared, so it must read as unanswered.
+	it("treats an invented non-none choice and its probabilities as unanswered, never fired", () => {
+		const res = stage1Response({
+			prompt_injection: {type: "choice", choice: "totally_malicious", probabilities: {totally_malicious: 0.95, none: 0.05}, confidence: 0.9},
+		});
+		const {evaluations, unanswered} = evaluateStage1(res, 0.5);
+		expect(unanswered).toEqual(["prompt_injection"]);
+		expect(evaluations.find((e) => e.rule.key === "prompt_injection")).toBeUndefined();
+	});
+
+	// Same hole with a declared choice: mass parked on an undeclared option inflates the margin
+	// past the threshold, so the probability vocabulary is checked too.
+	it("treats a declared choice with probability mass on an invented option as unanswered", () => {
+		const res = stage1Response({
+			prompt_injection: {type: "choice", choice: "present", probabilities: {present: 0.02, none: 0.03, injected_option: 0.95}, confidence: 0.9},
+		});
+		expect(evaluateStage1(res, 0.5).unanswered).toEqual(["prompt_injection"]);
+	});
+
+	// A probability outside [0, 1] defeats the margin safeguard (fired mass above 1); it is
+	// protocol drift, so the answer is unusable.
+	it("treats a probability outside [0, 1] as unanswered", () => {
+		const res = stage1Response({
+			data_exfiltration: {type: "choice", choice: "present", probabilities: {present: 7, none: -2}, confidence: 1},
+		});
+		expect(evaluateStage1(res, 0.5).unanswered).toEqual(["data_exfiltration"]);
+	});
+
+	// A score answer that invents a level outside its declared legend would fire a severity mapped
+	// by guesswork; only declared levels are usable.
+	it("treats a score answer with a level outside its declared levels as unanswered", () => {
+		const res = stage1Response({
+			unbounded_autonomy: {type: "score", score: 2, legend: {"0": "none", "1": "ultra"}, probabilities: {"1": 0.9, "0": 0.1}, confidence: 0.9},
+		});
+		expect(evaluateStage1(res, 0.5).unanswered).toEqual(["unbounded_autonomy"]);
+	});
+
+	// Float artifacts like 1e-12 overshoot are legitimate rounding, not drift: rejecting them would
+	// throw away real answers wholesale.
+	it("accepts a distribution with small rounding overshoot", () => {
+		const res = stage1Response({
+			data_exfiltration: {type: "choice", choice: "present", probabilities: {present: 0.970000000001, none: 0.029999999999}, confidence: 0.9},
+		});
+		const {evaluations, unanswered} = evaluateStage1(res, 0.5);
+		expect(unanswered).toEqual([]);
+		expect(evaluations.find((e) => e.rule.key === "data_exfiltration")).toMatchObject({fired: true});
 	});
 
 	it("records unanswered rules instead of treating them as fired or clean", () => {
@@ -365,6 +415,42 @@ describe("system1 scanner", () => {
 			const out = await scan();
 			expect(out.run.status).toBe("errored");
 			expect(out.findings).toEqual([]);
+		});
+
+		// The runner times the whole scan out at [jobs].scanner_timeout_ms and frees the job slot;
+		// a multi-part scan that kept asking parts would spend on calls nobody will read and hold
+		// real model concurrency above the configured bound. Past the deadline no new part call
+		// starts, the one in flight is aborted, and the run ends as timeout.
+		it("stops part calls at the run deadline and ends the run as timeout", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			// Part 1 resolves only after the deadline has passed; part 2 must never be asked.
+			mockFetch.mockImplementationOnce(
+				() => new Promise((resolve) => setTimeout(() => resolve({ok: true, status: 200, json: async () => stage1Response()} as unknown as Response), 80)),
+			);
+			mockJson(stage1Response());
+			const out = await createSystem1Scanner(SMALL, createOpenRouterConnector(SMALL), 40).scan(input(files));
+			expect(mockFetch).toHaveBeenCalledTimes(1);
+			expect(out.run.status).toBe("timeout");
+			expect(out.findings).toEqual([]);
+			// The in-flight call was handed an abort signal and it fired.
+			expect(mockFetch.mock.calls[0][1].signal?.aborted).toBe(true);
+		});
+
+		// The payload is arbitrary skill text: without a trust note on every question, instructions
+		// inside a malicious skill steer the answers to every rule (the review questions carry the
+		// same note on their quoted text). The per-rule question text itself stays unchanged.
+		it("marks the skill payload untrusted in every question of every part call", async () => {
+			vi.stubEnv("OPENROUTER_API_KEY", "k");
+			perPart(stage1Response(), 0);
+			const out = await scan();
+			expect(out.run.status).toBe("success");
+			for (let c = 0; c < partCount; c++) {
+				const questions = bodyOfCall(c).questions as Record<string, {instructions: string}>;
+				expect(Object.keys(questions)).toHaveLength(SYSTEM1_RULES.length);
+				for (const rule of SYSTEM1_RULES) {
+					expect(questions[rule.key]?.instructions).toBe(`${UNTRUSTED_SKILL_NOTE} ${rule.prompt.instructions}`);
+				}
+			}
 		});
 	});
 

@@ -10,7 +10,7 @@ import {evaluateStage1, type RuleEvaluation} from "./evaluate.js";
 import {locateFindings, type LocateReport} from "./locate.js";
 import {findingText, mapEvaluations} from "./map.js";
 import {buildPayload, hasSkillContent, skillNameFromPayload} from "./payload.js";
-import {SAFETY_RULES, SYSTEM1_RULES} from "./rules.js";
+import {SAFETY_RULES, SYSTEM1_RULES, withUntrustedSkillNote} from "./rules.js";
 import {type AggregateVerdict, type DecisionConnector, type DecisionResponse, type DecisionUsage, errorCode, SYSTEM1_SOURCE_ID} from "./types.js";
 
 const MODULE = "external-scanners.system1";
@@ -124,25 +124,42 @@ export function createSystem1Scanner(cfg: System1ScannerConfig, connector: Decis
 			const payload = buildPayload(input.textFiles, cfg.partChars, cfg.maxParts);
 			const skillName = skillNameFromPayload(input.textFiles);
 			logger.info({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, payloadChars: payload.chars, parts: payload.parts.length, truncated: payload.truncated}, "system1 scanner run started");
+			// Every question is asked over untrusted skill text, so each one carries the trust note
+			// (the review prompts mark their quoted text the same way).
+			const questions = withUntrustedSkillNote(SYSTEM1_RULES);
 
 			// One call per part, in order. Any failed or incomplete part fails the run: a part that was
-			// never judged would otherwise read as "nothing found" in it.
+			// never judged would otherwise read as "nothing found" in it. Like localization below, the
+			// loop honors the run's hard deadline: past it no new part call starts and the one in flight
+			// is aborted, so a multi-part scan cannot keep making paid calls after the runner has
+			// reported the timeout and freed the job slot.
+			const deadline = startedAt + runTimeoutMs;
+			const deadlineCtl = new AbortController();
+			const deadlineTimer = Number.isFinite(runTimeoutMs) ? setTimeout(() => deadlineCtl.abort(), Math.max(0, deadline - Date.now())) : null;
 			const answered: {response: DecisionResponse; evaluations: RuleEvaluation[]}[] = [];
-			for (const [index, part] of payload.parts.entries()) {
-				let response: DecisionResponse;
-				try {
-					response = await connector.askRules(skillName, part.text, SYSTEM1_RULES);
-				} catch (err) {
-					const code = errorCode(err);
-					logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code, part: index + 1}, "system1 rule scan failed");
-					return emptyRun(code === "timeout" ? "timeout" : "errored", startedAt, scannedAt, code);
+			try {
+				for (const [index, part] of payload.parts.entries()) {
+					if (Date.now() >= deadline) {
+						logger.warn({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, part: index + 1, parts: payload.parts.length}, "system1 run deadline reached; no further part calls");
+						return emptyRun("timeout", startedAt, scannedAt, "run deadline reached");
+					}
+					let response: DecisionResponse;
+					try {
+						response = await connector.askRules(skillName, part.text, questions, deadlineCtl.signal);
+					} catch (err) {
+						const code = errorCode(err);
+						logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, code, part: index + 1}, "system1 rule scan failed");
+						return emptyRun(code === "timeout" ? "timeout" : "errored", startedAt, scannedAt, code);
+					}
+					const {evaluations: partEvaluations, unanswered} = evaluateStage1(response, cfg.marginThreshold);
+					if (unanswered.length > 0) {
+						logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, unanswered: unanswered.length, part: index + 1}, "system1 answered incompletely");
+						return emptyRun("errored", startedAt, scannedAt, `system1 answered ${partEvaluations.length} of ${SYSTEM1_RULES.length} rule questions`);
+					}
+					answered.push({response, evaluations: partEvaluations});
 				}
-				const {evaluations: partEvaluations, unanswered} = evaluateStage1(response, cfg.marginThreshold);
-				if (unanswered.length > 0) {
-					logger.error({module: MODULE, scannerId: SYSTEM1_SOURCE_ID, unanswered: unanswered.length, part: index + 1}, "system1 answered incompletely");
-					return emptyRun("errored", startedAt, scannedAt, `system1 answered ${partEvaluations.length} of ${SYSTEM1_RULES.length} rule questions`);
-				}
-				answered.push({response, evaluations: partEvaluations});
+			} finally {
+				if (deadlineTimer) clearTimeout(deadlineTimer);
 			}
 			const evaluations = mergeParts(answered.map((a) => a.evaluations));
 			const stage1Response = answered[0].response;

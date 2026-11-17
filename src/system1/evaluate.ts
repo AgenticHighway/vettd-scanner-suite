@@ -95,6 +95,32 @@ export function evaluateStage1(response: DecisionResponse, marginThreshold: numb
 	return evaluateRules(response, SYSTEM1_RULES, marginThreshold);
 }
 
+/** Distributions may carry float artifacts (e.g. 1.0000000000000002 from a sum); rounding overshoot
+ *  inside this tolerance must not throw a real answer away. */
+const PROBABILITY_TOLERANCE = 1e-9;
+
+/** The options a rule declares on the wire: the criteria its question sends. */
+function declaredOptions(rule: System1Rule): ReadonlySet<string> {
+	if (rule.kind === "classification") return new Set(Object.keys(rule.options));
+	if (rule.kind === "score") return new Set(rule.prompt.levels);
+	return new Set(["none", "present"]);
+}
+
+/**
+ * An answer stays usable only inside what its rule declares: the choice must be a declared option,
+ * and every probability must sit on a declared option, finite and within [0, 1] up to rounding
+ * tolerance. Anything else — an invented option, an impossible probability — is protocol drift or
+ * steering, never evidence for a finding.
+ */
+function withinDeclared(rule: System1Rule, normalized: Normalized): boolean {
+	const options = declaredOptions(rule);
+	if (!options.has(normalized.choice)) return false;
+	for (const [option, p] of Object.entries(normalized.probabilities)) {
+		if (!options.has(option) || !Number.isFinite(p) || p < -PROBABILITY_TOLERANCE || p > 1 + PROBABILITY_TOLERANCE) return false;
+	}
+	return true;
+}
+
 /** The same evaluation over any subset of rules (localization re-asks only the rules it narrows). */
 export function evaluateRules(response: DecisionResponse, rules: readonly System1Rule[], marginThreshold: number): Stage1Evaluation {
 	const evaluations: RuleEvaluation[] = [];
@@ -102,8 +128,9 @@ export function evaluateRules(response: DecisionResponse, rules: readonly System
 	for (const rule of rules) {
 		const answer = response.answers?.[rule.key];
 		const normalized = answer ? normalizeAnswer(answer) : null;
-		// A classification answer must be one of its own options; anything else is unusable.
-		const usable = normalized && (rule.kind !== "classification" || normalized.choice in rule.options);
+		// Not only classifications: every answer is held to what its rule declares. An answer outside
+		// the declared options or a probability outside [0, 1] reads as unanswered, never as fired.
+		const usable = normalized !== null && withinDeclared(rule, normalized);
 		if (!answer || !normalized || !usable) {
 			unanswered.push(rule.key);
 			continue;

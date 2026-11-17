@@ -14,7 +14,7 @@
 import type {System1LocateConfig} from "../config/schema.js";
 import {evaluateRules, type RuleEvaluation} from "./evaluate.js";
 import type {Payload, PayloadSection} from "./payload.js";
-import type {System1Rule} from "./rules.js";
+import {withUntrustedSkillNote, type System1Rule} from "./rules.js";
 import {type DecisionConnector, type DecisionUsage, errorCode} from "./types.js";
 
 export type LocationMethod = "skill-md" | "narrowed" | "file-set";
@@ -268,7 +268,9 @@ function addUsage(sum: DecisionUsage, u: DecisionUsage | undefined): void {
 async function ask(deps: LocateDeps, region: Region, rules: System1Rule[], signal: AbortSignal, report: LocateReport) {
 	const started = Date.now();
 	try {
-		const response = await deps.connector.askRules(deps.skillName, region.text, rules, signal);
+		// The region text is untrusted skill content, so the re-ask carries the same trust note the
+		// part calls do.
+		const response = await deps.connector.askRules(deps.skillName, region.text, withUntrustedSkillNote(rules), signal);
 		const {evaluations, unanswered} = evaluateRules(response, rules, deps.marginThreshold);
 		addUsage(report.usage, response.usage);
 		report.asks.push({
