@@ -11,7 +11,11 @@ host = "0.0.0.0"    # REQUIRED: 0.0.0.0, not the config-default 127.0.0.1 — th
 port = 8080
 
 [jobs]
-max_concurrent = 2
+# 4, not the config-default 2: System 1 jobs are long (up to the 120s scanner
+# timeout), so at 2 concurrent a full 50-item batch drains in 25 sequential
+# rounds — slow enough that vettd's batch wait gives up on healthy batches.
+# vettd's suite-batch-client sizes its wait assumptions against this value.
+max_concurrent = 4
 scanner_timeout_ms = 120000
 max_batch_items = 50
 
